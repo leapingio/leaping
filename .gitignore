@@ -1,0 +1,7 @@
+node_modules
+__pycache__
+.idea/
+package-lock.json
+package.json
+.venv
+.env
