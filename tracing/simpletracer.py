@@ -139,6 +139,8 @@ class SimpleTracer:
 
         if current_file.startswith(self.project_dir) and "<" not in current_file and "conftest" not in current_file: # todo: change conftest to be in a diff folder to filter out better
             self.process_events(frame, event, arg)
+        else:
+            return
 
         return self.simple_tracer
 

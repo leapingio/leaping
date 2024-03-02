@@ -44,7 +44,7 @@ Here's the history of the relevant variables to this error:
 {}
 
 You have two options:
-1. If you are certain about the root cause, describe the fix to solve the root cause in as short of a declarative sentence as possible.
+1. If you are certain about the root cause, describe the fix in as short of a declarative sentence as possible.
 2. If you need more variable history, output the value of a variable name, and NOTHING else."""
 
 
