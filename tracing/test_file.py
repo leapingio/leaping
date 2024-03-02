@@ -22,4 +22,6 @@ def func2(y):
 
 def test_failure():
     val = func2(3)
+    k = 5
+    x = 3 / (val-26)
     assert val == 4

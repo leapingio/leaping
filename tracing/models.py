@@ -96,8 +96,7 @@ class ASTAssignment:
 
 # variable update from sys.settrace
 class RuntimeAssignment:
-    def __init__(self, name, value, path, type):
+    def __init__(self, name, value, path):
         self.name = name
         self.value = value
         self.path = path # path inside python object
-        self.type = type # either 'create' or 'update'

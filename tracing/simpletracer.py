@@ -53,10 +53,10 @@ def get_deltas(prev_locals, curr_locals):
             if not diffs:
                 continue
             for path, change in diffs:
-                deltas.append(RuntimeAssignment(name=local, value=str(change), path=path, type="update"))
+                deltas.append(RuntimeAssignment(name=local, value=str(change), path=path))
 
         if local not in prev_locals:
-            deltas.append(RuntimeAssignment(name=local, value=str(val), path="", type="create"))
+            deltas.append(RuntimeAssignment(name=local, value=str(val), path=""))
     
     return deltas
 
@@ -83,17 +83,31 @@ def create_ast_mapping(parsed_ast, mapping):
     for node in parsed_ast.body:
         if type(node) == ast.Assign:
             assignee = node.targets[0] # todo: deal with multi assign
-            variables = get_variables_in_assign(node.value)
 
-            # todo: What if lineno and end_lineno are different?
-            mapping[node.lineno].append(ASTAssignment(name=assignee, deps=variables))
+            if type(assignee) == ast.Attribute:
+                pass
+            elif type(assignee) == ast.Subscript:
+                pass
+            elif type(assignee) == ast.Name:
+                variables = get_variables_in_assign(node.value)
+
+                # todo: What if lineno and end_lineno are different?
+                mapping[node.lineno].append(ASTAssignment(name=assignee.id, deps=variables))
 
         elif type(node) == ast.Return:
             variables = get_variables_in_assign(node.value)
             mapping[node.lineno].append(ASTAssignment(name="return", deps=variables))
 
 
-def get_function_assign_dep_mapping(frame):
+def get_mapping_from_source(source):
+    parsed_ast = ast.parse(source).body[0]
+
+    mapping = defaultdict(list)
+    create_ast_mapping(parsed_ast, mapping)
+    return mapping
+
+
+def get_function_source_from_frame(frame):
     func_name = frame.f_code.co_name
     source_code = None
 
@@ -110,11 +124,7 @@ def get_function_assign_dep_mapping(frame):
         return
     
     dedented_source = textwrap.dedent(source_code)
-    parsed_ast = ast.parse(dedented_source).body[0]
-
-    mapping = defaultdict(list)
-    create_ast_mapping(parsed_ast, mapping)
-    return mapping
+    return dedented_source
 
 
 class SimpleTracer:
@@ -127,7 +137,7 @@ class SimpleTracer:
     def simple_tracer(self, frame, event: str, arg):
         current_file = os.path.abspath(frame.f_code.co_filename)
 
-        if current_file.startswith(self.project_dir) and "<" not in current_file:
+        if current_file.startswith(self.project_dir) and "<" not in current_file and "conftest" not in current_file: # todo: change conftest to be in a diff folder to filter out better
             self.process_events(frame, event, arg)
 
         return self.simple_tracer
@@ -159,7 +169,8 @@ class SimpleTracer:
             file_path = frame.f_code.co_filename
             func_name = frame.f_code.co_name
 
-            mapping = get_function_assign_dep_mapping(frame)
+            source = get_function_source_from_frame(frame)
+            mapping = get_mapping_from_source(source)
 
             if mapping:
                 self.function_to_mapping[(file_path, func_name)] = mapping
@@ -172,6 +183,35 @@ class SimpleTracer:
 
             cursor = self.create_cursor(file_path, frame)
 
-    def create_cursor(self, file_path_under_cursor, frame):
-        cursor = ExecutionCursor(file_path_under_cursor, frame.f_lineno, frame.f_code.co_name, frame.f_locals)
+    def create_cursor(self, file_path, frame):
+        cursor = ExecutionCursor(file_path, frame.f_lineno, frame.f_code.co_name, frame.f_locals)
         return cursor
+    
+    def get_variable_history(self, variable_name, file_path, func_name, first_line_no, max_depth=1, current_depth=0):
+        if current_depth > max_depth:
+            return ""
+
+        history = ""
+
+        for line_no, deltas in self.function_to_deltas.get((file_path, func_name), {}).items():
+            for delta in deltas:
+                if delta.name == variable_name:
+                    line = None
+                    with open(file_path) as f:
+                        line = f.readlines()[first_line_no + line_no - 2].strip()
+                        
+                    history += f"At line '{line}' in {func_name}, '{delta.name}' was set to {delta.value}"
+
+                    if current_depth < max_depth:
+                        for dep in self.get_variable_dependencies(variable_name, file_path, func_name):
+                            history += self.get_variable_history(dep, file_path, func_name, max_depth, current_depth + 1)
+                            
+        return history
+
+    def get_variable_dependencies(self, variable_name, file_path, func_name):
+        dependencies = []
+        for _, mappings in self.function_to_mapping.get((file_path, func_name), {}).items():
+            for mapping in mappings:
+                if mapping.name == variable_name:
+                    dependencies.extend(mapping.deps)
+        return dependencies
