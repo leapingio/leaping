@@ -4,6 +4,7 @@ import ast
 import inspect
 import textwrap
 from collections import defaultdict
+import os
 
 
 def compare_objects(obj1, obj2, diffs, path="", depth=0):
@@ -11,7 +12,7 @@ def compare_objects(obj1, obj2, diffs, path="", depth=0):
         return
 
     if not isinstance(obj1, type(obj2)):
-        diffs.apppend((path, obj2))
+        diffs.append((path, obj2))
         return
 
     if not hasattr(obj1, "__dict__") or not hasattr(obj2, "__dict__"):
@@ -66,7 +67,7 @@ def create_ast_mapping(parsed_ast, mapping):
         variables = []
         if type(node) == ast.Call:
             for arg in node.args:
-                variables = variables.extend(get_variables_in_assign(arg))
+                variables.extend(get_variables_in_assign(arg))
         elif type(node) == ast.BinOp:
             if hasattr(node.left, "id"):
                 variables.append(node.left.id)
@@ -117,18 +118,24 @@ def get_function_assign_dep_mapping(frame):
 
 
 class SimpleTracer:
-    def __init__(self):
+    def __init__(self, project_dir):
+        self.project_dir = project_dir
         self.call_stack = CallStack()
         self.function_to_mapping = {}
-        self.function_to_deltas = {}
+        self.function_to_deltas = defaultdict(lambda: defaultdict(list))
 
     def simple_tracer(self, frame, event: str, arg):
-        self.process_events(event, frame, arg)
+        current_file = os.path.abspath(frame.f_code.co_filename)
+
+        if current_file.startswith(self.project_dir):
+            self.process_events(frame, event, arg)
+
         return self.simple_tracer
 
     def process_events(self, event: str, frame, arg):
         file_path = frame.f_code.co_filename
         func_name = frame.f_code.co_name
+
         current_frame = self.call_stack.current_frame()
 
         if event == "line":
@@ -138,12 +145,12 @@ class SimpleTracer:
 
             relative_line_no = line_no - frame.f_code.co_firstlineno
 
-            prev_locals = current_frame.f_locals
+            prev_locals = current_frame.f_locals if current_frame else []
             curr_locals = frame.f_locals
             
             deltas = get_deltas(prev_locals, curr_locals)
             if deltas:
-                self.function_to_deltas[(file_path, func_name, relative_line_no)] = deltas
+                self.function_to_deltas[(file_path, func_name)][relative_line_no] = deltas
 
             cursor = self.create_cursor(file_path, frame)
             self.call_stack.new_cursor_in_current_frame(cursor)
