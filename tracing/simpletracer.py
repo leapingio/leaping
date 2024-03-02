@@ -127,12 +127,12 @@ class SimpleTracer:
     def simple_tracer(self, frame, event: str, arg):
         current_file = os.path.abspath(frame.f_code.co_filename)
 
-        if current_file.startswith(self.project_dir):
+        if current_file.startswith(self.project_dir) and "<" not in current_file:
             self.process_events(frame, event, arg)
 
         return self.simple_tracer
 
-    def process_events(self, event: str, frame, arg):
+    def process_events(self, frame, event, arg):
         file_path = frame.f_code.co_filename
         func_name = frame.f_code.co_name
 
@@ -159,7 +159,10 @@ class SimpleTracer:
             file_path = frame.f_code.co_filename
             func_name = frame.f_code.co_name
 
-            self.function_to_mapping[(file_path, func_name)] = get_function_assign_dep_mapping(frame)
+            mapping = get_function_assign_dep_mapping(frame)
+
+            if mapping:
+                self.function_to_mapping[(file_path, func_name)] = mapping
 
             cursor = self.create_cursor(file_path, frame)
             self.call_stack.enter_frame(cursor)
