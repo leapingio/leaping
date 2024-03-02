@@ -133,14 +133,24 @@ class SimpleTracer:
         self.call_stack = CallStack()
         self.function_to_mapping = {}
         self.function_to_deltas = defaultdict(lambda: defaultdict(list))
+        self.filename_to_path = {}
 
     def simple_tracer(self, frame, event: str, arg):
-        current_file = os.path.abspath(frame.f_code.co_filename)
+        if frame.f_code.co_filename not in self.filename_to_path:
+            self.filename_to_path[frame.f_code.co_filename] = os.path.abspath(frame.f_code.co_filename)
 
-        if current_file.startswith(self.project_dir) and "<" not in current_file and "conftest" not in current_file: # todo: change conftest to be in a diff folder to filter out better
-            self.process_events(frame, event, arg)
-        else:
+        current_file = self.filename_to_path[frame.f_code.co_filename]
+
+        if frame.f_code.co_filename[0] == "<":
             return
+
+        if current_file.endswith("conftest.py"): # todo: change conftest to be in a diff folder to filter out better
+            return
+
+        if not current_file.startswith(self.project_dir):
+            return
+        
+        self.process_events(frame, event, arg)
 
         return self.simple_tracer
 
