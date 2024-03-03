@@ -1,3 +1,4 @@
+from types import CodeType
 from simpletracer import SimpleTracer, get_function_source_from_frame
 import sys
 import subprocess
@@ -24,16 +25,42 @@ class SymbolExtractor(ast.NodeVisitor):
 tracer = None
 
 
+def monitor_call(code, instruction_offset, callable, arg0):
+    global tracer
+
+    try:
+        callable_name = code.co_name.__name__
+    except AttributeError:
+        callable_name = str(code.co_name)
+
+    if "test_failure" in callable_name:
+        sys.settrace(tracer.simple_tracer)
+
+
+def monitor_return(code: CodeType, instruction_offset: int, retval: object):
+    global tracer
+
+    if "test_failure" in code.co_name:
+        print("removing trace")
+        sys.settrace(None)
+        
+
 def pytest_runtest_setup(item):
     global tracer
 
     project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], encoding='utf-8').strip()
-
     tracer = SimpleTracer(project_dir)
-    sys.settrace(tracer.simple_tracer)
+
+    sys.monitoring.use_tool_id(3, "Tracer")
+    sys.monitoring.register_callback(3, sys.monitoring.events.CALL, monitor_call)
+    sys.monitoring.register_callback(3, sys.monitoring.events.PY_RETURN, monitor_return)
+    sys.monitoring.set_events(3, sys.monitoring.events.CALL | sys.monitoring.events.PY_RETURN)
+
 
 def pytest_runtest_teardown(item, nextitem):
     sys.settrace(None)
+    sys.monitoring.free_tool_id(3)
+
 
 error_context_prompt = """There was an '{}' when executing '{}' in the following function:
 
@@ -77,8 +104,8 @@ def pytest_runtest_makereport(item, call):
 
         prompt = error_context_prompt.format(error_type, line, source, history_message)
 
-        gpt = GPT("gpt-4-0125-preview", 0.5)
+        # gpt = GPT("gpt-4-0125-preview", 0.5)
 
-        gpt.add_message("user", prompt)
+        # gpt.add_message("user", prompt)
 
         # response = gpt.chat_completion()

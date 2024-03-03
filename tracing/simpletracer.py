@@ -144,7 +144,7 @@ class SimpleTracer:
         if frame.f_code.co_filename[0] == "<":
             return
 
-        if current_file.endswith("conftest.py"): # todo: change conftest to be in a diff folder to filter out better
+        if current_file.endswith("conftest.py") or current_file.endswith("simpletracer.py"): # todo: change conftest to be in a diff folder to filter out better
             return
 
         if not current_file.startswith(self.project_dir):
