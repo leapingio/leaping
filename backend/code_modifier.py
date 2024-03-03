@@ -108,7 +108,6 @@ class FileModifier:
         code_snippet: CodeSnippet,
         step,
     ):
-        # breakpoint()
         for idx, addition in enumerate(additions):
             line_number = code_snippet.start_line + addition.line_number
             indented_line = indented_new_lines[addition.line_number]

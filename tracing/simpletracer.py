@@ -141,8 +141,7 @@ class SimpleTracer:
         self.call_stack_history = []
         self.stack_size = 0
         self.scope = None
-
-        self.counter = 0
+        self.line_counter = defaultdict(int)
 
 
     def simple_tracer(self, frame, event: str, arg):
@@ -171,12 +170,19 @@ class SimpleTracer:
         file_path = frame.f_code.co_filename
         func_name = frame.f_code.co_name
 
-        current_frame = self.call_stack.current_frame()
-
         if event == "line":
             line_no = frame.f_lineno
             func_name = frame.f_code.co_name
             file_path = frame.f_code.co_filename
+
+            key = (file_path, func_name, line_no)
+            if self.line_counter[key] > 10: 
+                # heuristic to stop tracking deltas once we've hit a line more than 10 times
+                # should clear this dictionary if the functions gets called again separately (clear cache in 'call' event)
+                # 10 is arbitrary, might be tricks to produce a better number
+                return 
+            
+            self.line_counter[key] += 1
 
             if (file_path, func_name) not in self.function_to_source:
                 source = get_function_source_from_frame(frame)
@@ -190,6 +196,8 @@ class SimpleTracer:
                     self.function_to_mapping[(file_path, func_name)] = mapping
 
             relative_line_no = line_no - frame.f_code.co_firstlineno
+
+            current_frame = self.call_stack.current_frame()
 
             prev_locals = current_frame.f_locals if current_frame else []
             curr_locals = frame.f_locals

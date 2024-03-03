@@ -23,7 +23,7 @@ def func2(y):
 def test_failure():
     val = func2(3)
     k = 5
-    for i in range(3000000):
+    for i in range(300000):
         i ^= 2
     x = 3 / (val-26)
     assert val == 4
