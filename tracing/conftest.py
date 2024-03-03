@@ -28,57 +28,37 @@ project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], e
 tracer = SimpleTracer(project_dir)
 
 
-def monitor_call(code: CodeType, instruction_offset: int):
-    global tracer
-
-    try:
-        callable_name = code.co_name.__name__
-    except AttributeError:
-        callable_name = str(code.co_name)
-
-    if "test_failure" in callable_name:
-        sys.settrace(tracer.simple_tracer)
-
-
-def monitor_return(code: CodeType, instruction_offset: int, retval: object):
-    global tracer
-
-    if "test_failure" in code.co_name:
-        sys.settrace(None)
-
-
 def monitor_call_trace(code: CodeType, instruction_offset: int):
     global tracer
 
     func_name = code.co_name
 
-    if "test_failure" in func_name or tracer.stack_size > 0:
+    if "test_failure" in func_name or (tracer and tracer.stack_size > 0):
         if os.path.abspath(code.co_filename).startswith(tracer.project_dir) and "<" not in code.co_filename and "<" not in code.co_name and "conftest" not in code.co_filename:
-            tracer.call_stack_history.append((func_name, code.co_filename, "CALL", tracer.stack_size))
+            tracer.call_stack_history.append((code.co_filename, func_name, "CALL", tracer.stack_size))
             tracer.stack_size += 1
 
 
 def monitor_return_trace(code: CodeType, instruction_offset: int, retval: object):
     global tracer
 
-    if tracer.stack_size > 0 and os.path.abspath(code.co_filename).startswith(tracer.project_dir) and "<" not in code.co_filename and "<" not in code.co_name and "conftest" not in code.co_filename:
-        tracer.call_stack_history.append((code.co_name, code.co_filename, "RETURN", tracer.stack_size))
+    if tracer and tracer.stack_size > 0 and os.path.abspath(code.co_filename).startswith(tracer.project_dir) and "<" not in code.co_filename and "<" not in code.co_name and "conftest" not in code.co_filename:
+        tracer.call_stack_history.append((code.co_filename, code.co_name, "RETURN", tracer.stack_size))
         tracer.stack_size -= 1
 
 
 def pytest_runtest_setup(item):
+    global tracer
+
     sys.monitoring.use_tool_id(3, "Tracer")
 
     if tracer.scope:
-        sys.monitoring.register_callback(3, sys.monitoring.events.PY_START, monitor_call)
-        sys.monitoring.register_callback(3, sys.monitoring.events.PY_RETURN, monitor_return)
+        sys.settrace(tracer.simple_tracer)
     else:
         sys.monitoring.register_callback(3, sys.monitoring.events.PY_START, monitor_call_trace)
         sys.monitoring.register_callback(3, sys.monitoring.events.PY_RETURN, monitor_return_trace)
     
     sys.monitoring.set_events(3, sys.monitoring.events.PY_START | sys.monitoring.events.PY_RETURN)
-
-    
 
 
 def pytest_runtest_teardown(item, nextitem):
@@ -113,8 +93,7 @@ def pytest_runtest_makereport(item, call):
 def generate_suggestion():
     global tracer
 
-    breakpoint()
-
+    traceback = tracer.traceback
     while traceback.tb_next:
         traceback = traceback.tb_next
 
@@ -123,6 +102,9 @@ def generate_suggestion():
     file_path = frame.f_code.co_filename
     func_name = frame.f_code.co_name
     line_no = frame.f_lineno - frame.f_code.co_firstlineno + 1
+
+    breakpoint()
+    source = tracer.function_to_source[(file_path, func_name)]
 
     line = None
     with open(file_path) as f:
@@ -147,10 +129,10 @@ def add_scope():
 
     scope = set()
 
-    for func_name, file_name, call_type, depth in tracer.call_stack_history:
+    for file_name, func_name, call_type, depth in tracer.call_stack_history:
         if call_type != "RETURN" and depth < 4:
-            scope.add((func_name, file_name))
-        
+            scope.add((file_name, func_name))
+
     tracer.scope = scope
 
 
