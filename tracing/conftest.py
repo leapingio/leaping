@@ -4,6 +4,7 @@ import sys
 import subprocess
 import ast
 from gpt import GPT
+from _pytest.runner import runtestprotocol
 
 class SymbolExtractor(ast.NodeVisitor):
     def __init__(self):
@@ -104,8 +105,24 @@ def pytest_runtest_makereport(item, call):
 
         prompt = error_context_prompt.format(error_type, line, source, history_message)
 
+        # print("len history", len(tracer.function_to_deltas))
+
         # gpt = GPT("gpt-4-0125-preview", 0.5)
 
         # gpt.add_message("user", prompt)
 
         # response = gpt.chat_completion()
+
+
+def pytest_runtest_protocol(item, nextitem):
+    reports = runtestprotocol(item, nextitem=nextitem, log=False)
+
+    test_failed = any(report.failed for report in reports if report.when == 'call')
+
+    if test_failed:
+        runtestprotocol(item, nextitem=nextitem, log=False)
+
+    for report in reports:
+        item.ihook.pytest_runtest_logreport(report=report)
+
+    return True
