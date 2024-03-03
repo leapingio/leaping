@@ -5,6 +5,7 @@ import subprocess
 import ast
 from gpt import GPT
 from _pytest.runner import runtestprotocol
+import os
 
 class SymbolExtractor(ast.NodeVisitor):
     def __init__(self):
@@ -23,10 +24,11 @@ class SymbolExtractor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-tracer = None
+project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], encoding='utf-8').strip()
+tracer = SimpleTracer(project_dir)
 
 
-def monitor_call(code, instruction_offset, callable, arg0):
+def monitor_call(code: CodeType, instruction_offset: int):
     global tracer
 
     try:
@@ -42,20 +44,41 @@ def monitor_return(code: CodeType, instruction_offset: int, retval: object):
     global tracer
 
     if "test_failure" in code.co_name:
-        print("removing trace")
         sys.settrace(None)
-        
 
-def pytest_runtest_setup(item):
+
+def monitor_call_trace(code: CodeType, instruction_offset: int):
     global tracer
 
-    project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], encoding='utf-8').strip()
-    tracer = SimpleTracer(project_dir)
+    func_name = code.co_name
 
+    if "test_failure" in func_name or tracer.stack_size > 0:
+        if os.path.abspath(code.co_filename).startswith(tracer.project_dir) and "<" not in code.co_filename and "<" not in code.co_name and "conftest" not in code.co_filename:
+            tracer.call_stack_history.append((func_name, code.co_filename, "CALL", tracer.stack_size))
+            tracer.stack_size += 1
+
+
+def monitor_return_trace(code: CodeType, instruction_offset: int, retval: object):
+    global tracer
+
+    if tracer.stack_size > 0 and os.path.abspath(code.co_filename).startswith(tracer.project_dir) and "<" not in code.co_filename and "<" not in code.co_name and "conftest" not in code.co_filename:
+        tracer.call_stack_history.append((code.co_name, code.co_filename, "RETURN", tracer.stack_size))
+        tracer.stack_size -= 1
+
+
+def pytest_runtest_setup(item):
     sys.monitoring.use_tool_id(3, "Tracer")
-    sys.monitoring.register_callback(3, sys.monitoring.events.CALL, monitor_call)
-    sys.monitoring.register_callback(3, sys.monitoring.events.PY_RETURN, monitor_return)
-    sys.monitoring.set_events(3, sys.monitoring.events.CALL | sys.monitoring.events.PY_RETURN)
+
+    if tracer.scope:
+        sys.monitoring.register_callback(3, sys.monitoring.events.PY_START, monitor_call)
+        sys.monitoring.register_callback(3, sys.monitoring.events.PY_RETURN, monitor_return)
+    else:
+        sys.monitoring.register_callback(3, sys.monitoring.events.PY_START, monitor_call_trace)
+        sys.monitoring.register_callback(3, sys.monitoring.events.PY_RETURN, monitor_return_trace)
+    
+    sys.monitoring.set_events(3, sys.monitoring.events.PY_START | sys.monitoring.events.PY_RETURN)
+
+    
 
 
 def pytest_runtest_teardown(item, nextitem):
@@ -77,41 +100,58 @@ You have two options:
 
 
 def pytest_runtest_makereport(item, call):
+    global tracer
+
     if call.excinfo is not None:
         error_type, error_message, traceback = call.excinfo._excinfo
 
-        while traceback.tb_next:
-            traceback = traceback.tb_next
+        tracer.error_type = error_type
+        tracer.error_message = error_message
+        tracer.traceback = traceback    
 
-        frame = traceback.tb_frame
 
-        file_path = frame.f_code.co_filename
-        func_name = frame.f_code.co_name
-        line_no = frame.f_lineno - frame.f_code.co_firstlineno + 1
+def generate_suggestion():
+    global tracer
 
-        line = None
-        with open(file_path) as f:
-            line = f.readlines()[frame.f_lineno-1].strip()
+    breakpoint()
 
-        tree = ast.parse(line)
-        extractor = SymbolExtractor()
-        extractor.visit(tree)
-        error_symbols = extractor.symbols
-        error_symbol = error_symbols.pop() # todo: there can definitely be multiple but let's assume one for now
+    while traceback.tb_next:
+        traceback = traceback.tb_next
 
-        history_message = tracer.get_variable_history(error_symbol, file_path, func_name, frame.f_code.co_firstlineno)
+    frame = traceback.tb_frame
 
-        source = get_function_source_from_frame(frame)
+    file_path = frame.f_code.co_filename
+    func_name = frame.f_code.co_name
+    line_no = frame.f_lineno - frame.f_code.co_firstlineno + 1
 
-        prompt = error_context_prompt.format(error_type, line, source, history_message)
+    line = None
+    with open(file_path) as f:
+        line = f.readlines()[frame.f_lineno-1].strip()
 
-        # print("len history", len(tracer.function_to_deltas))
+    tree = ast.parse(line)
+    extractor = SymbolExtractor()
+    extractor.visit(tree)
+    error_symbols = extractor.symbols
+    error_symbol = error_symbols.pop() # todo: there can definitely be multiple but let's assume one for now
+    history_message = tracer.get_variable_history(error_symbol, file_path, func_name, frame.f_code.co_firstlineno)
+    source = get_function_source_from_frame(frame)
+    prompt = error_context_prompt.format(error_type, line, source, history_message)
+    gpt = GPT("gpt-4-0125-preview", 0.5)
+    gpt.add_message("user", prompt)
+    response = gpt.chat_completion()
 
-        # gpt = GPT("gpt-4-0125-preview", 0.5)
 
-        # gpt.add_message("user", prompt)
+# Before re-running failed test, need to add scope information to tracer so that we can instrument the re-run
+def add_scope():
+    global tracer
 
-        # response = gpt.chat_completion()
+    scope = set()
+
+    for func_name, file_name, call_type, depth in tracer.call_stack_history:
+        if call_type != "RETURN" and depth < 4:
+            scope.add((func_name, file_name))
+        
+    tracer.scope = scope
 
 
 def pytest_runtest_protocol(item, nextitem):
@@ -120,7 +160,9 @@ def pytest_runtest_protocol(item, nextitem):
     test_failed = any(report.failed for report in reports if report.when == 'call')
 
     if test_failed:
+        add_scope()
         runtestprotocol(item, nextitem=nextitem, log=False)
+        response = generate_suggestion() # todo: log message somewhere, what about back and forth in shell?
 
     for report in reports:
         item.ihook.pytest_runtest_logreport(report=report)

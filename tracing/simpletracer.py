@@ -134,6 +134,13 @@ class SimpleTracer:
         self.function_to_mapping = {}
         self.function_to_deltas = defaultdict(lambda: defaultdict(list))
         self.filename_to_path = {}
+        self.error_message = ""
+        self.error_type = ""
+        self.traceback = None
+        self.call_stack_history = []
+        self.stack_size = 0
+        self.scope = None
+
 
     def simple_tracer(self, frame, event: str, arg):
         if frame.f_code.co_filename not in self.filename_to_path:
@@ -145,6 +152,9 @@ class SimpleTracer:
             return
 
         if current_file.endswith("conftest.py") or current_file.endswith("simpletracer.py"): # todo: change conftest to be in a diff folder to filter out better
+            return
+        
+        if self.scope and (frame.f_code.co_name, current_file) not in self.scope:
             return
 
         if not current_file.startswith(self.project_dir):
