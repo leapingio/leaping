@@ -68,11 +68,7 @@ def pytest_runtest_teardown(item, nextitem):
     sys.monitoring.free_tool_id(3)
 
 
-error_context_prompt = """There was an '{}' when executing '{}' in the following function:
-
-{}
-
-Here's the history of the relevant variables to this error:
+error_context_prompt = """I got an error. Here's the trace:
 
 {}
 
@@ -104,11 +100,11 @@ def build_call_hierarchy(trace_data, function_to_source, function_to_call_mappin
             call_mapping = function_to_call_mapping[key]
             deltas = function_to_deltas[key]
 
-            line_nos = function_to_call_mapping[key][func_name]
+            line_nos = function_to_call_mapping[key][trace_func_name]
 
             if line_nos:
                 line_no = line_nos[0]
-                call_mapping[func_name] = line_nos[1:]
+                call_mapping[trace_func_name] = line_nos[1:]
 
                 assignments = function_to_assign_mapping[key]
 
@@ -154,6 +150,18 @@ def build_call_hierarchy(trace_data, function_to_source, function_to_call_mappin
                     context_line = function_to_source[key].split("\n")[line_no  - 1].strip()
                     root_call.children.append(VariableAssignmentNode(var_name, value, context_line))
 
+    # adding line with error at the end
+    traceback = tracer.traceback
+    while traceback.tb_next:
+        traceback = traceback.tb_next
+    frame = traceback.tb_frame
+    file_path = frame.f_code.co_filename
+    func_name = frame.f_code.co_name
+    line_no = frame.f_lineno - frame.f_code.co_firstlineno + 1
+    source_code = tracer.function_to_source[(file_path, func_name)]
+    error_context_line = source_code.split("\n")[line_no - 1].strip()
+    root_call.children.append(VariableAssignmentNode(tracer.error_type, tracer.error_message, error_context_line))
+
     return root_call
 
 
@@ -181,23 +189,13 @@ def generate_suggestion():
     root = build_call_hierarchy(tracer.call_stack_history, tracer.function_to_source, tracer.function_to_call_mapping, tracer.function_to_assign_mapping, tracer.function_to_deltas)
     output = []
     output_call_hierarchy([root], output)
-    trace = "\n".join(output)
 
-    breakpoint()
+    prompt = error_context_prompt.format("\n".join(output))
 
-    # traceback = tracer.traceback
-    # while traceback.tb_next:
-    #     traceback = traceback.tb_next
-    # frame = traceback.tb_frame
-    # file_path = frame.f_code.co_filename
-    # func_name = frame.f_code.co_name
-    # line_no = frame.f_lineno - frame.f_code.co_firstlineno + 1
-    # source_code = tracer.function_to_source[(file_path, func_name)]
-    # source_code.split("\n")[line_no?]
+    # todo: add relevant source code into the prompt as well
+    # for file_name, func_name in tracer.scope:
+    #     source = tracer.function_to_source[(file_name, func_name)]
 
-    history_message = tracer.get_variable_history(error_symbol, file_path, func_name, frame.f_code.co_firstlineno)
-    source = get_function_source_from_frame(frame)
-    prompt = error_context_prompt.format(error_type, line, source, history_message)
     gpt = GPT("gpt-4-0125-preview", 0.5)
     gpt.add_message("user", prompt)
     response = gpt.chat_completion()
@@ -256,6 +254,7 @@ def pytest_runtest_protocol(item, nextitem):
     if test_failed:
         add_scope()
         runtestprotocol(item, nextitem=nextitem, log=False)
+        generate_suggestion()
         launch_cli()
 
 
