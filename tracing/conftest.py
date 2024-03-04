@@ -97,7 +97,7 @@ def build_call_hierarchy(trace_data, function_to_source, function_to_call_mappin
     root_call = FunctionCallNode(file_name, func_name)
     stack = [root_call]
 
-    for file_name, func_name, event_type, depth in trace_data[1:]:
+    for trace_file_name, trace_func_name, event_type, depth in trace_data[1:]:
         key = (stack[-1].file_name, stack[-1].func_name)
 
         if event_type == 'CALL':
@@ -131,26 +131,46 @@ def build_call_hierarchy(trace_data, function_to_source, function_to_call_mappin
 
                     del assignments[assignment_line_no]  # to avoid inserting same assignment multiple times
 
-            new_call = FunctionCallNode(file_name, func_name)
+            new_call = FunctionCallNode(trace_file_name, trace_func_name)
 
             stack[-1].children.append(new_call)
             stack.append(new_call)
         elif event_type == 'RETURN':
             stack.pop()
 
+    # add potential remaining assignments from root function
+    deltas = function_to_deltas[(file_name, func_name)]
+    remaining_assigns = function_to_assign_mapping[(file_name, func_name)]
+    if remaining_assigns:
+        for line_no, assigns in remaining_assigns.items():
+            for assign in assigns:
+                var_name = assign.name
+                value = None
+                for runtime_assignment in deltas[line_no]:
+                    if runtime_assignment.name == var_name:
+                        value = runtime_assignment.value
+
+                if value:
+                    context_line = function_to_source[key].split("\n")[line_no  - 1].strip()
+                    root_call.children.append(VariableAssignmentNode(var_name, value, context_line))
+
     return root_call
 
 
 def output_call_hierarchy(nodes, output, indent=0):
-    for node in nodes:
-        prefix = ' ' * indent * 2
+    last_index = len(nodes) - 1
+    for index, node in enumerate(nodes):
+        branch_prefix = "    "
+        if indent > 0:
+            branch_prefix = "|   " * (indent - 1) + ("+--- " if index < last_index else "\\--- ")
+
         if isinstance(node, FunctionCallNode):
-            line = f"{prefix}Function: {node.func_name}()"  # todo: think about arguments?
+            line = f"{branch_prefix}Function: {node.func_name}()"  # Todo: think about arguments
             print(line)
             output.append(line)
             output_call_hierarchy(node.children, output, indent + 1)
         elif isinstance(node, VariableAssignmentNode):
-            line = f"{prefix}{node.context_line}  # {node.var_name}: {node.value}"
+            line = f"{branch_prefix}{node.context_line}  # {node.var_name}: {node.value}"
             print(line)
             output.append(line)
 
