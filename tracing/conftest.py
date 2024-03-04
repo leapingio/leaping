@@ -72,6 +72,10 @@ error_context_prompt = """I got an error. Here's the trace:
 
 {}
 
+Here's the source code that we got the trace from:
+
+{}
+
 You have two options:
 1. If you are certain about the root cause, describe the fix in as short of a declarative sentence as possible.
 2. If you need more variable history, output the value of a variable name, and NOTHING else."""
@@ -190,11 +194,20 @@ def generate_suggestion():
     output = []
     output_call_hierarchy([root], output)
 
-    prompt = error_context_prompt.format("\n".join(output))
-
     # todo: add relevant source code into the prompt as well
-    # for file_name, func_name in tracer.scope:
-    #     source = tracer.function_to_source[(file_name, func_name)]
+    source_text = ""
+
+    for key in tracer.scope:
+        func_source = None
+        if key in tracer.method_to_class_source:
+            func_source = tracer.method_to_class_source[key]
+        else:
+            func_source = tracer.function_to_source[key]
+        
+        if func_source:
+            source_text += func_source + "\n\n"
+
+    prompt = error_context_prompt.format("\n".join(output), source_text)
 
     gpt = GPT("gpt-4-0125-preview", 0.5)
     gpt.add_message("user", prompt)

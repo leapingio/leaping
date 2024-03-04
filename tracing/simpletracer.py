@@ -93,7 +93,7 @@ def get_mapping_from_source(source):
     return assign_mapping, call_mapping
 
 
-def get_function_source_from_frame(frame):
+def get_function_source_from_frame(frame, method_to_class_source):
     func_name = frame.f_code.co_name
     source_code = None
 
@@ -105,6 +105,7 @@ def get_function_source_from_frame(frame):
             if hasattr(cls, func_name):
                 method = getattr(cls, func_name)
                 source_code = inspect.getsource(method)
+                method_to_class_source[(frame.f_code.co_filename, func_name)] = inspect.getsource(cls)
     
     if not source_code:
         return
@@ -121,6 +122,7 @@ class SimpleTracer:
         self.function_to_call_mapping = defaultdict(list)
         self.function_to_deltas = defaultdict(lambda: defaultdict(list))
         self.function_to_source = {}
+        self.method_to_class_source = {}
         self.filename_to_path = {}
         self.error_message = ""
         self.error_type = ""
@@ -172,7 +174,7 @@ class SimpleTracer:
             self.line_counter[key] += 1
 
             if (file_path, func_name) not in self.function_to_source:
-                source = get_function_source_from_frame(frame)
+                source = get_function_source_from_frame(frame, self.method_to_class_source)
 
                 if source:
                     self.function_to_source[(file_path, func_name)] = source
