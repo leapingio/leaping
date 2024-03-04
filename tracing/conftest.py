@@ -1,4 +1,8 @@
+import threading
 from types import CodeType
+
+import pexpect
+
 from simpletracer import SimpleTracer, get_function_source_from_frame
 import sys
 import subprocess
@@ -13,7 +17,7 @@ class VariableAssignmentNode:
         self.var_name = var_name
         self.value = value
         self.context_line = context_line
-        
+
 
 class FunctionCallNode:
     def __init__(self, file_name, func_name):
@@ -85,7 +89,7 @@ def pytest_runtest_makereport(item, call):
 
         tracer.error_type = error_type
         tracer.error_message = error_message
-        tracer.traceback = traceback    
+        tracer.traceback = traceback
 
 
 def build_call_hierarchy(trace_data, function_to_source, function_to_call_mapping, function_to_assign_mapping, function_to_deltas):
@@ -105,7 +109,7 @@ def build_call_hierarchy(trace_data, function_to_source, function_to_call_mappin
             if line_nos:
                 line_no = line_nos[0]
                 call_mapping[func_name] = line_nos[1:]
-            
+
                 assignments = function_to_assign_mapping[key]
 
                 assignments_to_add_line_nos = set()
@@ -124,7 +128,7 @@ def build_call_hierarchy(trace_data, function_to_source, function_to_call_mappin
                         if value:
                             context_line = function_to_source[key].split("\n")[assignment_line_no  - 1].strip()
                             stack[-1].children.append(VariableAssignmentNode(var_name, value, context_line))
-                            
+
                     del assignments[assignment_line_no]  # to avoid inserting same assignment multiple times
 
             new_call = FunctionCallNode(file_name, func_name)
@@ -193,6 +197,37 @@ def add_scope():
     tracer.scope = scope
 
 
+def launch_cli():
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(('localhost', 0))  # let the os pick a port
+    sock.listen(1)
+    port = sock.getsockname()[1]
+
+    def handle_output(sock):
+        connection, client_address = sock.accept()
+        exit_command_received = False
+        while not exit_command_received:
+            data = connection.recv(2048)
+            if data == b'exit':
+                exit_command_received = True
+            if data == b"get_traceback":
+                print('ddfsfd')
+            if data == b"suggestion":
+                generate_suggestion()
+
+        connection.close()
+
+    thread = threading.Thread(target=handle_output, args=(sock,))
+    thread.start()
+
+    child = pexpect.spawn(f"leaping --port {port}")
+    child.interact()
+
+    thread.join()
+    sock.close()
+
+
 def pytest_runtest_protocol(item, nextitem):
     reports = runtestprotocol(item, nextitem=nextitem, log=False)
 
@@ -201,7 +236,8 @@ def pytest_runtest_protocol(item, nextitem):
     if test_failed:
         add_scope()
         runtestprotocol(item, nextitem=nextitem, log=False)
-        response = generate_suggestion() # todo: log message somewhere, what about back and forth in shell?
+        launch_cli()
+
 
     for report in reports:
         item.ihook.pytest_runtest_logreport(report=report)
