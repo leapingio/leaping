@@ -1,8 +1,10 @@
+import signal
 import threading
 from types import CodeType
 
 import pexpect
 
+from gpt import GPT
 from simpletracer import SimpleTracer, get_function_source_from_frame
 import sys
 import subprocess
@@ -36,7 +38,11 @@ def monitor_call_trace(code: CodeType, instruction_offset: int):
     func_name = code.co_name
 
     if tracer and tracer.test_name in func_name or (tracer and tracer.stack_size > 0):
-        if os.path.abspath(code.co_filename).startswith(tracer.project_dir) and "<" not in code.co_filename and "<" not in code.co_name and "conftest" not in code.co_filename:
+        leaping_specific_files = [
+            "conftest",
+            "gpt", # TODO: maybe make this LEAPING_ or something less likely to run into collisions
+        ]
+        if os.path.abspath(code.co_filename).startswith(tracer.project_dir) and "<" not in code.co_filename and "<" not in code.co_name and not any(file in code.co_filename for file in leaping_specific_files):
             tracer.call_stack_history.append((code.co_filename, func_name, "CALL", tracer.stack_size))
             tracer.stack_size += 1
 
@@ -185,7 +191,7 @@ def output_call_hierarchy(nodes, output, indent=0):
             output.append(line)
 
 
-def generate_suggestion():
+def generate_suggestion(gpt: GPT):
     global tracer
 
     root = build_call_hierarchy(tracer.call_stack_history, tracer.function_to_source, tracer.function_to_call_mapping, tracer.function_to_assign_mapping, tracer.function_to_deltas)
@@ -206,7 +212,6 @@ def generate_suggestion():
 
     prompt = error_context_prompt.format("\n".join(output), source_text)
 
-    gpt = GPT("gpt-4-0125-preview", 0.5)
     gpt.add_message("user", prompt)
     response = gpt.chat_completion()
 
@@ -234,9 +239,15 @@ def launch_cli():
     sock.listen(1)
     port = sock.getsockname()[1]
 
+    def cleanup(signum, frame):
+        sock.close()
+
+    signal.signal(signal.SIGINT, cleanup)
+
     def handle_output(sock):
         connection, client_address = sock.accept()
-        initial_message = generate_suggestion()
+        gpt = GPT("gpt-4-0125-preview", 0.5)
+        initial_message = generate_suggestion(gpt)
         connection.sendall(initial_message.encode('utf-8'))
         exit_command_received = False
         while not exit_command_received:
@@ -245,8 +256,10 @@ def launch_cli():
                 exit_command_received = True
             if data == b"get_traceback":
                 connection.sendall(b"some-traceback-string")
-            if data == b"suggestion":
-                generate_suggestion()
+            user_input = data.decode('utf-8')
+            gpt.add_message("user", user_input)
+            response = gpt.chat_completion()
+            connection.sendall(response.encode('utf-8'))
 
         connection.close()
 

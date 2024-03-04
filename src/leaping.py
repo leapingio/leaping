@@ -4,7 +4,9 @@ import threading
 import time
 from prompt_toolkit import prompt
 
-def spinner(message="Loading..."):
+global stop_spinner
+stop_spinner = threading.Event()
+def spinner_animation(message="Loading..."):
     spinner_chars = ['|', '/', '-', '\\']
     idx = 0
     while not stop_spinner.is_set():
@@ -12,6 +14,20 @@ def spinner(message="Loading..."):
         idx += 1
         time.sleep(0.1)
     print('\r', end='')
+
+def create_spinner():
+    global stop_spinner
+    stop_spinner.clear()
+    spinner_thread = threading.Thread(target=spinner_animation, args=("Thinking...",))
+    spinner_thread.start()
+    return spinner_thread
+
+def stop_spinner_animation(spinner_thread):
+    stop_spinner.set()
+    spinner_thread.join()
+
+
+
 
 def main():
     parser = argparse.ArgumentParser(description="W")
@@ -22,7 +38,8 @@ def main():
         raise ValueError("Port number not provided. Exiting...")
 
     global stop_spinner
-    stop_spinner = threading.Event()
+
+
 
     print(""" 
  _                     _             
@@ -33,23 +50,26 @@ def main():
                 |_|            |___/ 
 """)
 
-    spinner_thread = threading.Thread(target=spinner, args=("Thinking...",))
-    spinner_thread.start()
-
     sock = socket(AF_INET, SOCK_STREAM)
     sock.connect(('localhost', args.port))
 
+    spinner = create_spinner()
     first_response = sock.recv(2048)
-    stop_spinner.set() 
-    spinner_thread.join()
+    stop_spinner_animation(spinner)
+
 
     print("\033[92mExplanation: " + first_response.decode("utf-8"))
 
     while True:
-        user_input = prompt("\nIf the explanation is wrong, say why and we'll try again. Press q to exit: ")
-        if user_input.strip() == "q":
+        user_input = prompt("If the explanation is wrong, say why and we'll try again. Press q to exit: \n>")
+
+        if user_input.strip() == "q" or user_input.strip() == "exit":
             sock.sendall(b"exit")
             break
+        elif user_input.strip() == "":  # Check if the input is just an Enter key press (empty string)
+            continue  # Skip the rest of the loop and prompt again
         sock.sendall(user_input.encode("utf-8"))
+        spinner = create_spinner()
         response = sock.recv(2048)
+        stop_spinner_animation(spinner)
         print(response.decode("utf-8"))
