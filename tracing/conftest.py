@@ -35,7 +35,7 @@ def monitor_call_trace(code: CodeType, instruction_offset: int):
 
     func_name = code.co_name
 
-    if "test_failure" in func_name or (tracer and tracer.stack_size > 0):
+    if tracer.test_name in func_name or (tracer and tracer.stack_size > 0):
         if os.path.abspath(code.co_filename).startswith(tracer.project_dir) and "<" not in code.co_filename and "<" not in code.co_name and "conftest" not in code.co_filename:
             tracer.call_stack_history.append((code.co_filename, func_name, "CALL", tracer.stack_size))
             tracer.stack_size += 1
@@ -51,6 +51,8 @@ def monitor_return_trace(code: CodeType, instruction_offset: int, retval: object
 
 def pytest_runtest_setup(item):
     global tracer
+
+    tracer.test_name = item.name
 
     sys.monitoring.use_tool_id(3, "Tracer")
 
@@ -267,7 +269,6 @@ def pytest_runtest_protocol(item, nextitem):
     if test_failed:
         add_scope()
         runtestprotocol(item, nextitem=nextitem, log=False)
-        generate_suggestion()
         launch_cli()
 
 
