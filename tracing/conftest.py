@@ -78,7 +78,7 @@ Here's the source code that we got the trace from:
 
 {}
 
-If you are certain about the root cause, describe it as tersely as possible, in a single sentence."""
+If you are certain about the root cause, describe it as tersely as possible, in a single sentence. Don't start the sentence with 'The root cause of the error is', just say what it is."""
 
 
 def pytest_runtest_makereport(item, call):
