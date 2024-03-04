@@ -7,21 +7,16 @@ from gpt import GPT
 from _pytest.runner import runtestprotocol
 import os
 
-class SymbolExtractor(ast.NodeVisitor):
-    def __init__(self):
-        self.symbols = set()
-        self.assigned_symbols = set() 
 
-    def visit_Assign(self, node):
-        for target in node.targets:
-            if isinstance(target, ast.Name):
-                self.assigned_symbols.add(target.id)
-        self.generic_visit(node)
+class FunctionCallNode:
+    def __init__(self, file_name, func_name, context_line):
+        self.file_name = file_name
+        self.func_name = func_name
+        self.context_line = context_line
+        self.children = []
 
-    def visit_Name(self, node):
-        if node.id not in self.assigned_symbols:
-            self.symbols.add(node.id)
-        self.generic_visit(node)
+    def add_child(self, child):
+        self.children.append(child)
 
 
 project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], encoding='utf-8').strip()
@@ -90,31 +85,64 @@ def pytest_runtest_makereport(item, call):
         tracer.traceback = traceback    
 
 
+def build_call_hierarchy(trace_data, function_to_source, function_to_call_mapping, function_to_assign_mapping, function_to_deltas):
+
+    file_name, func_name, event_type, _ = trace_data[0]
+    root_call = FunctionCallNode(file_name, func_name, "")
+    stack = [root_call]
+
+    for file_name, func_name, event_type, depth in trace_data[1:]:
+        key = (stack[-1].file_name, stack[-1].func_name)
+
+        if event_type == 'CALL':
+            call_mapping = function_to_call_mapping[key]
+
+            line_nos = function_to_call_mapping[key][func_name]
+
+            context_line = ""
+            if line_nos:
+                # no line_nos means there's no direct function call that leads to a call event (__init__ for example). For now just have no context line
+                line_no = line_nos[0]
+                call_mapping[func_name] = line_nos[1:]
+                context_line = function_to_source[key].split("\n")[line_no  - 1].strip()
+
+            new_call = FunctionCallNode(file_name, func_name, context_line)
+
+            stack[-1].add_child(new_call)
+            stack.append(new_call)
+        elif event_type == 'RETURN':
+            stack.pop()
+
+    return root_call
+
+
+def output_call_hierarchy(nodes, output, indent=0):
+    for node in nodes:
+        print(' ' * indent * 2 + f"{node.func_name} ({node.file_name})")
+        output.append(' ' * indent * 2 + f"{node.func_name} ({node.file_name})")
+        output_call_hierarchy(node.children, output, indent + 1)
+
+
 def generate_suggestion():
     global tracer
 
-    traceback = tracer.traceback
-    while traceback.tb_next:
-        traceback = traceback.tb_next
+    root = build_call_hierarchy(tracer.call_stack_history, tracer.function_to_source, tracer.function_to_call_mapping, tracer.function_to_assign_mapping, tracer.function_to_deltas)
 
-    frame = traceback.tb_frame
-
-    file_path = frame.f_code.co_filename
-    func_name = frame.f_code.co_name
-    line_no = frame.f_lineno - frame.f_code.co_firstlineno + 1
-
+    output = []
+    output_call_hierarchy([root], output)
+    trace = "\n".join(output)
     breakpoint()
-    source = tracer.function_to_source[(file_path, func_name)]
 
-    line = None
-    with open(file_path) as f:
-        line = f.readlines()[frame.f_lineno-1].strip()
+    # traceback = tracer.traceback
+    # while traceback.tb_next:
+    #     traceback = traceback.tb_next
+    # frame = traceback.tb_frame
+    # file_path = frame.f_code.co_filename
+    # func_name = frame.f_code.co_name
+    # line_no = frame.f_lineno - frame.f_code.co_firstlineno + 1
+    # source_code = tracer.function_to_source[(file_path, func_name)]
+    # source_code.split("\n")[line_no?]
 
-    tree = ast.parse(line)
-    extractor = SymbolExtractor()
-    extractor.visit(tree)
-    error_symbols = extractor.symbols
-    error_symbol = error_symbols.pop() # todo: there can definitely be multiple but let's assume one for now
     history_message = tracer.get_variable_history(error_symbol, file_path, func_name, frame.f_code.co_firstlineno)
     source = get_function_source_from_frame(frame)
     prompt = error_context_prompt.format(error_type, line, source, history_message)
@@ -133,6 +161,7 @@ def add_scope():
         if call_type != "RETURN" and depth < 4:
             scope.add((file_name, func_name))
 
+    tracer.call_stack_history = []  # reset stack history since we are re-running test
     tracer.scope = scope
 
 

@@ -61,50 +61,36 @@ def get_deltas(prev_locals, curr_locals):
     return deltas
 
 
-def create_ast_mapping(parsed_ast, mapping):
+def create_ast_mapping(parsed_ast, assign_mapping, call_mapping):
 
-    def get_variables_in_assign(node):
-        variables = []
-        if type(node) == ast.Call:
-            for arg in node.args:
-                variables.extend(get_variables_in_assign(arg))
-        elif type(node) == ast.BinOp:
-            if hasattr(node.left, "id"):
-                variables.append(node.left.id)
-            if hasattr(node.right, "id"):
-                variables.append(node.right.id)
-            
-        elif type(node) == ast.Name:
-            if hasattr(node, "id"):
-                variables.append(node.id)
+    def process_node(node):
+        if isinstance(node, ast.Assign):
+            assignee = node.targets[0]
+            if isinstance(assignee, ast.Name):
+                variables = [n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)]
+                assign_mapping[node.lineno].append(ASTAssignment(name=assignee.id, deps=variables))
 
-        return variables
+        elif isinstance(node, ast.Return):
+            variables = [n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)]
+            assign_mapping[node.lineno].append(ASTAssignment(name="return", deps=variables))
 
-    for node in parsed_ast.body:
-        if type(node) == ast.Assign:
-            assignee = node.targets[0] # todo: deal with multi assign
+        elif isinstance(node, ast.Call):
+            if hasattr(node.func, 'id'):  # Direct calls
+                call_mapping[node.func.id].append(node.lineno)
+            elif hasattr(node.func, 'attr'):  # Method calls
+                call_mapping[node.func.attr].append(node.lineno)
 
-            if type(assignee) == ast.Attribute:
-                pass
-            elif type(assignee) == ast.Subscript:
-                pass
-            elif type(assignee) == ast.Name:
-                variables = get_variables_in_assign(node.value)
-
-                # todo: What if lineno and end_lineno are different?
-                mapping[node.lineno].append(ASTAssignment(name=assignee.id, deps=variables))
-
-        elif type(node) == ast.Return:
-            variables = get_variables_in_assign(node.value)
-            mapping[node.lineno].append(ASTAssignment(name="return", deps=variables))
+    for node in ast.walk(parsed_ast):
+        process_node(node)
 
 
 def get_mapping_from_source(source):
     parsed_ast = ast.parse(source).body[0]
 
-    mapping = defaultdict(list)
-    create_ast_mapping(parsed_ast, mapping)
-    return mapping
+    assign_mapping = defaultdict(list)  # line number -> list of assigns
+    call_mapping = defaultdict(list)  # function name -> list of line numbers
+    create_ast_mapping(parsed_ast, assign_mapping, call_mapping)
+    return assign_mapping, call_mapping
 
 
 def get_function_source_from_frame(frame):
@@ -131,7 +117,8 @@ class SimpleTracer:
     def __init__(self, project_dir):
         self.project_dir = project_dir
         self.call_stack = CallStack()
-        self.function_to_mapping = {}
+        self.function_to_assign_mapping = defaultdict(list)
+        self.function_to_call_mapping = defaultdict(list)
         self.function_to_deltas = defaultdict(lambda: defaultdict(list))
         self.function_to_source = {}
         self.filename_to_path = {}
@@ -190,10 +177,12 @@ class SimpleTracer:
                 if source:
                     self.function_to_source[(file_path, func_name)] = source
                     
-                mapping = get_mapping_from_source(source)
+                assign_mapping, call_mapping = get_mapping_from_source(source)
 
-                if mapping:
-                    self.function_to_mapping[(file_path, func_name)] = mapping
+                if assign_mapping:
+                    self.function_to_assign_mapping[(file_path, func_name)] = assign_mapping
+                if call_mapping:
+                    self.function_to_call_mapping[(file_path, func_name)] = call_mapping
 
             relative_line_no = line_no - frame.f_code.co_firstlineno
 
@@ -248,7 +237,7 @@ class SimpleTracer:
 
     def get_variable_dependencies(self, variable_name, file_path, func_name):
         dependencies = []
-        for _, mappings in self.function_to_mapping.get((file_path, func_name), {}).items():
+        for _, mappings in self.function_to_assign_mapping.get((file_path, func_name), {}).items():
             for mapping in mappings:
                 if mapping.name == variable_name:
                     dependencies.extend(mapping.deps)
