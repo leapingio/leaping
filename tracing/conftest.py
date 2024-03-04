@@ -35,7 +35,7 @@ def monitor_call_trace(code: CodeType, instruction_offset: int):
 
     func_name = code.co_name
 
-    if tracer.test_name in func_name or (tracer and tracer.stack_size > 0):
+    if tracer and tracer.test_name in func_name or (tracer and tracer.stack_size > 0):
         if os.path.abspath(code.co_filename).startswith(tracer.project_dir) and "<" not in code.co_filename and "<" not in code.co_name and "conftest" not in code.co_filename:
             tracer.call_stack_history.append((code.co_filename, func_name, "CALL", tracer.stack_size))
             tracer.stack_size += 1
@@ -78,9 +78,7 @@ Here's the source code that we got the trace from:
 
 {}
 
-You have two options:
-1. If you are certain about the root cause, describe the fix in as short of a declarative sentence as possible.
-2. If you need more variable history, output the value of a variable name, and NOTHING else."""
+If you are certain about the root cause, describe it as tersely as possible, in a single sentence."""
 
 
 def pytest_runtest_makereport(item, call):
@@ -180,12 +178,10 @@ def output_call_hierarchy(nodes, output, indent=0):
 
         if isinstance(node, FunctionCallNode):
             line = f"{branch_prefix}Function: {node.func_name}()"  # Todo: think about arguments
-            print(line)
             output.append(line)
             output_call_hierarchy(node.children, output, indent + 1)
         elif isinstance(node, VariableAssignmentNode):
             line = f"{branch_prefix}{node.context_line}  # {node.var_name}: {node.value}"
-            print(line)
             output.append(line)
 
 
@@ -196,7 +192,6 @@ def generate_suggestion():
     output = []
     output_call_hierarchy([root], output)
 
-    # todo: add relevant source code into the prompt as well
     source_text = ""
 
     for key in tracer.scope:
@@ -214,6 +209,8 @@ def generate_suggestion():
     gpt = GPT("gpt-4-0125-preview", 0.5)
     gpt.add_message("user", prompt)
     response = gpt.chat_completion()
+
+    return response
 
 
 # Before re-running failed test, need to add scope information to tracer so that we can instrument the re-run
@@ -239,13 +236,15 @@ def launch_cli():
 
     def handle_output(sock):
         connection, client_address = sock.accept()
+        initial_message = generate_suggestion()
+        connection.sendall(initial_message.encode('utf-8'))
         exit_command_received = False
         while not exit_command_received:
             data = connection.recv(2048)
             if data == b'exit':
                 exit_command_received = True
             if data == b"get_traceback":
-                print('ddfsfd')
+                connection.sendall(b"some-traceback-string")
             if data == b"suggestion":
                 generate_suggestion()
 
