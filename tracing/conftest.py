@@ -8,15 +8,18 @@ from _pytest.runner import runtestprotocol
 import os
 
 
+class VariableAssignmentNode:
+    def __init__(self, var_name, value, context_line):  # todo: deal with object paths
+        self.var_name = var_name
+        self.value = value
+        self.context_line = context_line
+        
+
 class FunctionCallNode:
-    def __init__(self, file_name, func_name, context_line):
+    def __init__(self, file_name, func_name):
         self.file_name = file_name
         self.func_name = func_name
-        self.context_line = context_line
         self.children = []
-
-    def add_child(self, child):
-        self.children.append(child)
 
 
 project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], encoding='utf-8').strip()
@@ -86,9 +89,8 @@ def pytest_runtest_makereport(item, call):
 
 
 def build_call_hierarchy(trace_data, function_to_source, function_to_call_mapping, function_to_assign_mapping, function_to_deltas):
-
     file_name, func_name, event_type, _ = trace_data[0]
-    root_call = FunctionCallNode(file_name, func_name, "")
+    root_call = FunctionCallNode(file_name, func_name)
     stack = [root_call]
 
     for file_name, func_name, event_type, depth in trace_data[1:]:
@@ -96,19 +98,38 @@ def build_call_hierarchy(trace_data, function_to_source, function_to_call_mappin
 
         if event_type == 'CALL':
             call_mapping = function_to_call_mapping[key]
+            deltas = function_to_deltas[key]
 
             line_nos = function_to_call_mapping[key][func_name]
 
-            context_line = ""
             if line_nos:
-                # no line_nos means there's no direct function call that leads to a call event (__init__ for example). For now just have no context line
                 line_no = line_nos[0]
                 call_mapping[func_name] = line_nos[1:]
-                context_line = function_to_source[key].split("\n")[line_no  - 1].strip()
+            
+                assignments = function_to_assign_mapping[key]
 
-            new_call = FunctionCallNode(file_name, func_name, context_line)
+                assignments_to_add_line_nos = set()
+                for assignment_line_no in assignments.keys():
+                    if assignment_line_no < line_no:
+                        assignments_to_add_line_nos.add(assignment_line_no)
 
-            stack[-1].add_child(new_call)
+                for assignment_line_no in assignments_to_add_line_nos:
+                    for ast_assignment in assignments[assignment_line_no]:
+                        var_name = ast_assignment.name
+                        value = None
+                        for runtime_assignment in deltas[assignment_line_no]: # data structured should be changed to avoid this loop
+                            if runtime_assignment.name == var_name:
+                                value = runtime_assignment.value
+
+                        if value:
+                            context_line = function_to_source[key].split("\n")[assignment_line_no  - 1].strip()
+                            stack[-1].children.append(VariableAssignmentNode(var_name, value, context_line))
+                            
+                    del assignments[assignment_line_no]  # to avoid inserting same assignment multiple times
+
+            new_call = FunctionCallNode(file_name, func_name)
+
+            stack[-1].children.append(new_call)
             stack.append(new_call)
         elif event_type == 'RETURN':
             stack.pop()
@@ -118,19 +139,26 @@ def build_call_hierarchy(trace_data, function_to_source, function_to_call_mappin
 
 def output_call_hierarchy(nodes, output, indent=0):
     for node in nodes:
-        print(' ' * indent * 2 + f"{node.func_name} ({node.file_name})")
-        output.append(' ' * indent * 2 + f"{node.func_name} ({node.file_name})")
-        output_call_hierarchy(node.children, output, indent + 1)
+        prefix = ' ' * indent * 2
+        if isinstance(node, FunctionCallNode):
+            line = f"{prefix}Function: {node.func_name}()"  # todo: think about arguments?
+            print(line)
+            output.append(line)
+            output_call_hierarchy(node.children, output, indent + 1)
+        elif isinstance(node, VariableAssignmentNode):
+            line = f"{prefix}{node.context_line}  # {node.var_name}: {node.value}"
+            print(line)
+            output.append(line)
 
 
 def generate_suggestion():
     global tracer
 
     root = build_call_hierarchy(tracer.call_stack_history, tracer.function_to_source, tracer.function_to_call_mapping, tracer.function_to_assign_mapping, tracer.function_to_deltas)
-
     output = []
     output_call_hierarchy([root], output)
     trace = "\n".join(output)
+
     breakpoint()
 
     # traceback = tracer.traceback
