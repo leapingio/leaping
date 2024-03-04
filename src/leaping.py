@@ -15,7 +15,7 @@ def main():
     args = parser.parse_args()
     if not args.port:
         raise ValueError("Port number not provided. Exiting...")
-    #
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect(('localhost', int(args.port)))
 
@@ -25,8 +25,7 @@ def main():
     print(ascii_art)
 
     first_response = sock.recv(2048)
-    print("Explanation:", first_response.decode("utf-8"))
-
+    print("\033[92mExplanation: " + first_response.decode("utf-8"))
 
     while True:
         user_input = prompt("\nIf the explanation is wrong, say why and we'll try again. Press q to exit: ")
