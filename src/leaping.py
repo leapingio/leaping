@@ -2,8 +2,6 @@ import argparse
 from socket import socket
 
 from prompt_toolkit import prompt
-from prompt_toolkit.completion import WordCompleter
-import pyfiglet
 import socket
 
 
@@ -19,10 +17,14 @@ def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect(('localhost', int(args.port)))
 
-
-    commands_completer = WordCompleter(['exit', 'hello', 'help'], ignore_case=True)
-    ascii_art = pyfiglet.figlet_format("Leaping")
-    print(ascii_art)
+    print(""" 
+ _                     _             
+| |    ___  __ _ _ __ (_)_ __   __ _ 
+| |   / _ \\/ _` | '_ \\| | '_ \\ / _` |
+| |__|  __/ (_| | |_) | | | | | (_| |
+|_____\\___|\\__,_| .__/|_|_| |_|\\__, |
+                |_|            |___/ 
+""")
 
     first_response = sock.recv(2048)
     print("\033[92mExplanation: " + first_response.decode("utf-8"))
