@@ -39,8 +39,6 @@ def main():
 
     global stop_spinner
 
-
-
     print(""" 
  _                     _             
 | |    ___  __ _ _ __ (_)_ __   __ _ 
@@ -61,7 +59,7 @@ def main():
     print("\033[92mExplanation: " + first_response.decode("utf-8"))
 
     while True:
-        user_input = prompt("If the explanation is wrong, say why and we'll try again. Press q to exit: \n>")
+        user_input = prompt("If the explanation is wrong, say why and we'll try again. Press q to exit: \n> ")
 
         if user_input.strip() == "q" or user_input.strip() == "exit":
             sock.sendall(b"exit")
