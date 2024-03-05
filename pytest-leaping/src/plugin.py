@@ -6,12 +6,13 @@ from types import CodeType
 
 import pexpect
 
-from .simpletracer import SimpleTracer
+from simpletracer import SimpleTracer
 import subprocess
-from .gpt import GPT
+from gpt import GPT
 from _pytest.runner import runtestprotocol
 import os
 import time
+from models import FunctionCallNode, VariableAssignmentNode
 
 
 def pytest_configure(config):
@@ -34,18 +35,6 @@ def pytest_addoption(parser):
     parser.addini('HELLO', 'Dummy pytest.ini setting')
 
 
-class VariableAssignmentNode:
-    def __init__(self, var_name, value, context_line):  # todo: deal with object paths
-        self.var_name = var_name
-        self.value = value
-        self.context_line = context_line
-
-
-class FunctionCallNode:
-    def __init__(self, file_name, func_name):
-        self.file_name = file_name
-        self.func_name = func_name
-        self.children = []
 
 
 project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], encoding='utf-8').strip()
@@ -112,9 +101,9 @@ If you are certain about the root cause, describe it as tersely as possible, in 
 
 
 def pytest_runtest_makereport(item, call):
-    leaping_option = item.config.getoption('--leaping')
-    if not leaping_option:
-        return
+    # leaping_option = item.config.getoption('--leaping')
+    # if not leaping_option:
+    #     return
     global tracer
 
     if call.excinfo is not None:
@@ -138,6 +127,7 @@ def build_call_hierarchy(trace_data, function_to_source, function_to_call_mappin
             call_mapping = function_to_call_mapping[key]
             deltas = function_to_deltas[key]
 
+            print(function_to_call_mapping)
             line_nos = function_to_call_mapping[key][trace_func_name]
 
             if line_nos:

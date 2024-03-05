@@ -41,7 +41,7 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/leaping/pytest-leaping"
 [project.entry-points.pytest11]
-django = "pytest_leaping.plugin"
+django = "plugin"
 
 [[tool.poetry.source]]
 name = "test-pypi"

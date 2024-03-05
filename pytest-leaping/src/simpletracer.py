@@ -1,5 +1,5 @@
 
-from .models import ExecutionCursor, CallStack, ASTAssignment, RuntimeAssignment
+from models import ExecutionCursor, CallStack, ASTAssignment, RuntimeAssignment
 import ast
 import inspect
 import textwrap

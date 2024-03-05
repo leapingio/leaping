@@ -100,3 +100,17 @@ class RuntimeAssignment:
         self.name = name
         self.value = value
         self.path = path # path inside python object
+
+
+class VariableAssignmentNode:
+    def __init__(self, var_name, value, context_line):  # todo: deal with object paths
+        self.var_name = var_name
+        self.value = value
+        self.context_line = context_line
+
+
+class FunctionCallNode:
+    def __init__(self, file_name, func_name):
+        self.file_name = file_name
+        self.func_name = func_name
+        self.children = []
