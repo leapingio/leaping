@@ -118,6 +118,9 @@ class SimpleTracer:
     def __init__(self, project_dir):
         self.project_dir = project_dir
         self.call_stack = CallStack()
+        self.test_name = None
+        self.test_start = None
+        self.test_duration = None
         self.function_to_assign_mapping = defaultdict(list)
         self.function_to_call_mapping = defaultdict(list)
         self.function_to_deltas = defaultdict(lambda: defaultdict(list))
@@ -168,7 +171,7 @@ class SimpleTracer:
             if self.line_counter[key] > 10: 
                 # heuristic to stop tracking deltas once we've hit a line more than 10 times
                 # should clear this dictionary if the functions gets called again separately (clear cache in 'call' event)
-                # 10 is arbitrary, might be tricks to produce a better number
+                # todo: 10 is arbitrary, might be tricks to produce a better number
                 return 
             
             self.line_counter[key] += 1

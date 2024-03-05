@@ -10,6 +10,8 @@ from .simpletracer import SimpleTracer
 import subprocess
 from .gpt import GPT
 from _pytest.runner import runtestprotocol
+import os
+import time
 
 
 def pytest_configure(config):
@@ -80,6 +82,7 @@ def pytest_runtest_setup(item):
     global tracer
 
     tracer.test_name = item.name
+    tracer.test_start = time.time()
 
     sys.monitoring.use_tool_id(3, "Tracer")
 
@@ -303,6 +306,9 @@ def pytest_runtest_protocol(item, nextitem):
     reports = runtestprotocol(item, nextitem=nextitem, log=False)
 
     test_failed = any(report.failed for report in reports if report.when == 'call')
+
+    tracer.test_duration = time.time() - tracer.test_start
+    tracer.test_start = None
 
     if test_failed:
         add_scope()
