@@ -35,9 +35,6 @@ def pytest_addoption(parser):
 
     parser.addini('HELLO', 'Dummy pytest.ini setting')
 
-
-
-
 project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], encoding='utf-8').strip()
 tracer = SimpleTracer(project_dir)
 
@@ -50,6 +47,7 @@ def monitor_call_trace(code: CodeType, instruction_offset: int):
     if tracer and tracer.test_name in func_name or (tracer and tracer.stack_size > 0):
         leaping_specific_files = [
             "conftest",
+            "plugin"
             "gpt",  # TODO: maybe make this LEAPING_ or something less likely to run into collisions
         ]
         if os.path.abspath(code.co_filename).startswith(
@@ -132,9 +130,9 @@ def add_deltas(tracer, key, stack, counter_map, line_no, greater_than=False):
             delta_list = tracer.function_to_deltas[key][assignment_line_no]
             if not delta_list: 
                 continue 
-            # deltas are runtime assignments, which means that since a function can get executed multiple times during an execution trace, we need to keep a 
+            # deltas are runtime assignments, which means that since a function can get executed multiple times during an execution trace, we need to keep a
             # monotonically increasing counter (per function and per line number) to get the right deltas
-            delta_index = counter_map[key][assignment_line_no]   
+            delta_index = counter_map[key][assignment_line_no]
             if delta_index >= len(delta_list):  # technically shouldn't get here
                 continue
             deltas = delta_list[delta_index]
@@ -250,7 +248,7 @@ def generate_suggestion(gpt: GPT):
     prompt = error_context_prompt.format("\n".join(output), source_text)
 
     gpt.add_message("user", prompt)
-    response = gpt.chat_completion()
+    response = gpt.chat_completion(stream=True)
 
     return response
 
@@ -281,7 +279,11 @@ def launch_cli():
         connection, client_address = sock.accept()
         gpt = GPT("gpt-4-0125-preview", 0.5)
         initial_message = generate_suggestion(gpt)
-        connection.sendall(initial_message.encode('utf-8'))
+        for chunk in initial_message:
+            if chunk_text := chunk.choices[0].delta.content:
+                connection.sendall(chunk_text.encode('utf-8'))
+        connection.sendall(b"LEAPING_STOP")
+
         exit_command_received = False
         while not exit_command_received:
             data = connection.recv(2048)
@@ -316,7 +318,7 @@ def pytest_runtest_protocol(item, nextitem):
 
     tracer.test_duration = time.time() - tracer.test_start
     tracer.test_start = None
-
+    print(tracer.call_stack_history)
     if test_failed:
         add_scope()
         runtestprotocol(item, nextitem=nextitem, log=False)
@@ -328,40 +330,3 @@ def pytest_runtest_protocol(item, nextitem):
     return True
 
 
-def is_application_code(file_path, project_root=None):
-    file_path = os.path.abspath(file_path)
-    project_root = os.path.abspath(project_root)
-
-    if "opt/homebrew" in file_path:
-        return False
-
-    if file_path.startswith(project_root):
-        return True
-
-    python_lib_paths = [os.path.join(p, "site-packages") for p in sys.path] + [
-        os.path.join(p, "dist-packages") for p in sys.path
-    ]
-
-    if "site-packages" in file_path:
-        return False
-
-    return not any(
-        file_path.startswith(os.path.abspath(lib_path))
-        for lib_path in python_lib_paths
-    )
-
-
-def my_tracer(frame, event, arg=None):
-    if not is_application_code(frame.f_code.co_filename, os.getcwd()):
-        return
-
-    code = frame.f_code
-
-    # extracts calling function name
-    func_name = code.co_name
-
-    # extracts the line number
-    line_no = frame.f_lineno
-    file_name = code.co_filename
-
-    return my_tracer

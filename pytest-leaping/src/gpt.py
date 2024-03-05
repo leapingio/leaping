@@ -16,12 +16,15 @@ class GPT:
     def add_message(self, role, prompt):
         self.messages.append({"role": role, "content": prompt})
 
-    def chat_completion(self):
+    def chat_completion(self, stream=False):
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=self.messages,
             temperature=self.temperature,
+            stream=stream,
         )
+        if stream:
+            return response
         response_content = response.choices[0].message.content
         self.add_message("assistant", response_content)
 

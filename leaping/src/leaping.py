@@ -52,11 +52,14 @@ def main():
     sock.connect(('localhost', args.port))
 
     spinner = create_spinner()
-    first_response = sock.recv(2048)
-    stop_spinner_animation(spinner)
+    stop_sent = False
+    while not stop_sent:
+        response = sock.recv(2048)
+        stop_spinner_animation(spinner)
+        if response == b"LEAPING_STOP":
+            break
+        print(response.decode("utf-8"), end="")
 
-
-    print("\033[92mExplanation: " + first_response.decode("utf-8"))
 
     while True:
         user_input = prompt("If the explanation is wrong, say why and we'll try again. Press q to exit: \n> ")

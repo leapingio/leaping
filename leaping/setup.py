@@ -9,6 +9,6 @@ setup(
         ],
     },
     install_requires=[
-        "pytest-leaping==0.1.0",
+        "pytest-leaping==0.1.1",
     ],
 )
