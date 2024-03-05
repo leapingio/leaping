@@ -7,3 +7,4 @@ package.json
 .env
 .DS_Store
 leaping.egg-info/
+dist/
