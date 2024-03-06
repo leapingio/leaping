@@ -115,8 +115,41 @@ def pytest_runtest_makereport(item, call):
         tracer.traceback = traceback
 
 
-def build_call_hierarchy(trace_data, function_to_source, function_to_call_mapping, function_to_assign_mapping,
-                         function_to_deltas, function_to_call_args):
+def add_deltas(tracer, key, stack, counter_map, line_no, greater_than=False):
+    assignments = tracer.function_to_assign_mapping[key]
+    assignments_to_add_line_nos = set()
+    for assignment_line_no in assignments.keys():
+        if greater_than and assignment_line_no > line_no:
+            assignments_to_add_line_nos.add(assignment_line_no)
+        if not greater_than and assignment_line_no < line_no:
+            assignments_to_add_line_nos.add(assignment_line_no)
+
+    for assignment_line_no in assignments_to_add_line_nos:
+        for ast_assignment in assignments[assignment_line_no]:
+            var_name = ast_assignment.name
+            value = None
+
+            delta_list = tracer.function_to_deltas[key][assignment_line_no]
+            if not delta_list: 
+                continue 
+            delta_index = counter_map[key][assignment_line_no]  
+            if delta_index >= len(delta_list):
+                continue
+            deltas = delta_list[delta_index]
+            for runtime_assignment in deltas: 
+                if runtime_assignment.name == var_name:
+                    value = runtime_assignment.value
+
+            if value:
+                context_line = tracer.function_to_source[key].split("\n")[assignment_line_no  - 1].strip()
+                stack[-1].children.append(VariableAssignmentNode(var_name, value, context_line))
+
+
+def build_call_hierarchy(tracer):
+    trace_data = tracer.call_stack_history
+    function_to_call_mapping = tracer.function_to_call_mapping 
+    function_to_call_args = tracer.function_to_call_args
+
     file_name, func_name, event_type, _ = trace_data[0]
     root_call = FunctionCallNode(file_name, func_name, [])  # todo: can root level pytest functions have call args?
     stack = [root_call]
@@ -128,43 +161,18 @@ def build_call_hierarchy(trace_data, function_to_source, function_to_call_mappin
         key = (stack[-1].file_name, stack[-1].func_name)
 
         if event_type == 'CALL':  # strategy here is to create VariableAssignmentObjects for all the lines up to the current call
-            call_mapping = function_to_call_mapping[key]
 
-            line_nos = function_to_call_mapping[key][trace_func_name]
+            call_mapping = function_to_call_mapping[key]  # if there is no call mapping, probably out of scope
 
-            if line_nos:
+            if call_mapping and call_mapping[trace_func_name]:
+                line_nos = call_mapping[trace_func_name]
                 line_no = line_nos[0]
                 remaining_line_nos = line_nos[1:]
                 call_mapping[trace_func_name] = remaining_line_nos
                 if not remaining_line_nos and key == (file_name, func_name):  # this means we are the last call within the root function
                     last_root_call_line = line_no  # save that line
 
-                assignments = function_to_assign_mapping[key]
-
-                assignments_to_add_line_nos = set()
-                for assignment_line_no in assignments.keys():
-                    if assignment_line_no < line_no:
-                        assignments_to_add_line_nos.add(assignment_line_no)
-
-                for assignment_line_no in assignments_to_add_line_nos:
-                    for ast_assignment in assignments[assignment_line_no]:
-                        var_name = ast_assignment.name
-                        value = None
-                        delta_list = function_to_deltas[key][assignment_line_no]
-                        if not delta_list:  # todo: what does this mean
-                            continue 
-                        delta_index = counter_map[key][assignment_line_no]  
-                        if delta_index >= len(delta_list):
-                            continue
-                        deltas = delta_list[delta_index]
-                        for runtime_assignment in deltas: 
-                            if runtime_assignment.name == var_name:
-                                value = runtime_assignment.value
-
-                        if value:
-                            counter_map[key][assignment_line_no] += 1
-                            context_line = function_to_source[key].split("\n")[assignment_line_no  - 1].strip()
-                            stack[-1].children.append(VariableAssignmentNode(var_name, value, context_line))
+                add_deltas(tracer, key, stack, counter_map, line_no) 
 
             call_args_list = function_to_call_args[(trace_file_name, trace_func_name)]
             if call_args_list:
@@ -174,35 +182,16 @@ def build_call_hierarchy(trace_data, function_to_source, function_to_call_mappin
 
             stack[-1].children.append(new_call)
             stack.append(new_call)
+
         elif event_type == 'RETURN':
+            add_deltas(tracer, key, stack, counter_map, 0, greater_than=True)
             stack.pop()
 
 
-    # here we add the last variable variable assignments in the root func that happen after the last function call within root
-    key = (file_name, func_name)
-    assignments = function_to_assign_mapping[key]
-    assignments_to_add_line_nos = set()
-    for assignment_line_no in assignments.keys():
-        if assignment_line_no > last_root_call_line:
-            assignments_to_add_line_nos.add(assignment_line_no)
+    # add the last variable variable assignments in the root func that happen after the last function call within root
+    add_deltas(tracer, (file_name, func_name), stack, counter_map, last_root_call_line, greater_than=True)
 
-    for assignment_line_no in assignments_to_add_line_nos:
-        for ast_assignment in assignments[assignment_line_no]:
-            var_name = ast_assignment.name
-            value = None
-            if not function_to_deltas[key][assignment_line_no]:
-                continue
-            deltas = function_to_deltas[key][assignment_line_no][0]  # should be precisely one since root func should only get called once
-            for runtime_assignment in deltas: 
-                if runtime_assignment.name == var_name:
-                    value = runtime_assignment.value
-
-            if value:
-                context_line = function_to_source[key].split("\n")[assignment_line_no  - 1].strip()
-                stack[-1].children.append(VariableAssignmentNode(var_name, value, context_line))
-
-
-    # here we are adding the erroring line to the trace
+    # add the erroring line to the trace
     traceback = tracer.traceback
     while traceback.tb_next:
         traceback = traceback.tb_next
@@ -237,8 +226,7 @@ def output_call_hierarchy(nodes, output, indent=0):
 def generate_suggestion(gpt: GPT):
     global tracer
 
-    root = build_call_hierarchy(tracer.call_stack_history, tracer.function_to_source, tracer.function_to_call_mapping,
-                                tracer.function_to_assign_mapping, tracer.function_to_deltas, tracer.function_to_call_args)
+    root = build_call_hierarchy(tracer)
     output = []
     output_call_hierarchy([root], output)
 

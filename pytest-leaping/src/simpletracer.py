@@ -171,8 +171,6 @@ class SimpleTracer:
 
         if event == "line":
             line_no = frame.f_lineno
-            func_name = frame.f_code.co_name
-            file_path = frame.f_code.co_filename
 
             key = (file_path, func_name, line_no)
             if self.line_counter[key] > 10: 
@@ -211,18 +209,15 @@ class SimpleTracer:
             self.call_stack.new_cursor_in_current_frame(cursor)
 
         if event == "call":
-            file_path = frame.f_code.co_filename
-            func_name = frame.f_code.co_name
-
             arg_deltas: list[RuntimeAssignment] = get_deltas([], frame.f_locals)
             if arg_deltas:
                 self.function_to_call_args[(file_path, func_name)].append(arg_deltas)
+
             cursor = self.create_cursor(file_path, frame)
             self.call_stack.enter_frame(cursor)
 
         if event == "return":
             self.call_stack.exit_frame()
-
             cursor = self.create_cursor(file_path, frame)
 
     def create_cursor(self, file_path, frame):
