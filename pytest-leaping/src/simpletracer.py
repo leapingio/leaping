@@ -64,14 +64,20 @@ def get_deltas(prev_locals, curr_locals):
 def create_ast_mapping(parsed_ast, assign_mapping, call_mapping):
 
     def process_node(node):
-        if isinstance(node, ast.Assign):
+        if isinstance(node, ast.arguments):
+            for arg in node.args:
+                assign_mapping[arg.lineno].append(ASTAssignment(name=arg.arg, deps=[]))
+
+        elif isinstance(node, ast.Assign):
             assignee = node.targets[0]
             if isinstance(assignee, ast.Name):
                 variables = [n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)]
                 assign_mapping[node.lineno].append(ASTAssignment(name=assignee.id, deps=variables))
 
         elif isinstance(node, ast.Return):
-            variables = [n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)]
+            variables = []
+            if node.value:
+                variables = [n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)]
             assign_mapping[node.lineno].append(ASTAssignment(name="return", deps=variables))
 
         elif isinstance(node, ast.Call):
@@ -124,6 +130,7 @@ class SimpleTracer:
         self.function_to_assign_mapping = defaultdict(list)
         self.function_to_call_mapping = defaultdict(list)
         self.function_to_deltas = defaultdict(lambda: defaultdict(list))
+        self.function_to_call_args = defaultdict(list)
         self.function_to_source = {}
         self.method_to_class_source = {}
         self.filename_to_path = {}
@@ -196,9 +203,9 @@ class SimpleTracer:
             prev_locals = current_frame.f_locals if current_frame else []
             curr_locals = frame.f_locals
             
-            deltas = get_deltas(prev_locals, curr_locals)
+            deltas: list[RuntimeAssignment] = get_deltas(prev_locals, curr_locals)
             if deltas:
-                self.function_to_deltas[(file_path, func_name)][relative_line_no] = deltas
+                self.function_to_deltas[(file_path, func_name)][relative_line_no].append(deltas)
 
             cursor = self.create_cursor(file_path, frame)
             self.call_stack.new_cursor_in_current_frame(cursor)
@@ -207,6 +214,9 @@ class SimpleTracer:
             file_path = frame.f_code.co_filename
             func_name = frame.f_code.co_name
 
+            arg_deltas: list[RuntimeAssignment] = get_deltas([], frame.f_locals)
+            if arg_deltas:
+                self.function_to_call_args[(file_path, func_name)].append(arg_deltas)
             cursor = self.create_cursor(file_path, frame)
             self.call_stack.enter_frame(cursor)
 
@@ -224,7 +234,7 @@ class SimpleTracer:
             return ""
 
         history = ""
-
+        # todo: change this once we actually use variable history
         for line_no, deltas in self.function_to_deltas.get((file_path, func_name), {}).items():
             for delta in deltas:
                 if delta.name == variable_name:

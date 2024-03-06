@@ -110,7 +110,8 @@ class VariableAssignmentNode:
 
 
 class FunctionCallNode:
-    def __init__(self, file_name, func_name):
+    def __init__(self, file_name, func_name, call_args):
         self.file_name = file_name
         self.func_name = func_name
+        self.call_args = call_args
         self.children = []
