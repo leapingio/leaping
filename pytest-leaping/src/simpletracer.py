@@ -105,7 +105,7 @@ def get_function_source_from_frame(frame, method_to_class_source):
 
     if func_name in frame.f_globals:
         source_code = inspect.getsource(frame.f_globals[func_name])
-    else:
+    else:  # deal with methods that are not part of global scope, so we have to look at instance methods of self, where self is in the local scope
         if 'self' in frame.f_locals:
             cls = frame.f_locals['self'].__class__
             if hasattr(cls, func_name):
@@ -139,7 +139,7 @@ class SimpleTracer:
         self.traceback = None
         self.call_stack_history = []
         self.stack_size = 0
-        self.scope = None
+        self.scope = None 
         self.line_counter = defaultdict(int)
 
 
@@ -181,17 +181,17 @@ class SimpleTracer:
             
             self.line_counter[key] += 1
 
-            if (file_path, func_name) not in self.function_to_source:
+            if (file_path, func_name) not in self.function_to_source:  # if we haven't yet gotten the source/ast parsed the function
                 source = get_function_source_from_frame(frame, self.method_to_class_source)
 
                 if source:
                     self.function_to_source[(file_path, func_name)] = source
                     
-                assign_mapping, call_mapping = get_mapping_from_source(source)
+                assign_mapping, call_mapping = get_mapping_from_source(source)  # through the AST parsing of the source code, get map of assignments and calls by line number
 
-                if assign_mapping:
+                if assign_mapping:  # dict of line_no -> list of ASTAssignment objects
                     self.function_to_assign_mapping[(file_path, func_name)] = assign_mapping
-                if call_mapping:
+                if call_mapping:  # dict of the name of a function being called -> list of line_no (since a function can be called at multiple lines within the same function)
                     self.function_to_call_mapping[(file_path, func_name)] = call_mapping
 
             relative_line_no = line_no - frame.f_code.co_firstlineno
@@ -209,7 +209,7 @@ class SimpleTracer:
             self.call_stack.new_cursor_in_current_frame(cursor)
 
         if event == "call":
-            arg_deltas: list[RuntimeAssignment] = get_deltas([], frame.f_locals)
+            arg_deltas: list[RuntimeAssignment] = get_deltas([], frame.f_locals)  # these deltas represent the parameters at the start of a function
             if arg_deltas:
                 self.function_to_call_args[(file_path, func_name)].append(arg_deltas)
 
