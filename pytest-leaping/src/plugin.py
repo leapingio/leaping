@@ -12,6 +12,7 @@ from _pytest.runner import runtestprotocol
 import os
 import time
 from models import FunctionCallNode, VariableAssignmentNode
+from _pytest.capture import MultiCapture
 
 tracer = SimpleTracer()
 
@@ -20,13 +21,20 @@ def pytest_configure(config):
     leaping_option = config.getoption('--leaping')
     if not leaping_option:
         return
+
+    capture_manager = config.pluginmanager.getplugin('capturemanager')   # force the -s option
+    if capture_manager._global_capturing is not None:
+        capture_manager._global_capturing.pop_outerr_to_orig()
+        capture_manager._global_capturing.stop_capturing()
+        capture_manager._global_capturing = MultiCapture(in_=None, out=None, err=None)
+
     try:
         project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], encoding='utf-8').strip()
     except Exception:
         project_dir = str(config.rootdir)
 
     tracer.project_dir = project_dir
-    config.option.capture = 'no'  # setting the -s flag
+    
     config.addinivalue_line("filterwarnings", "ignore")
 
 
