@@ -308,13 +308,18 @@ def launch_cli():
     sock.listen(1)
     port = sock.getsockname()[1]
 
-    def handle_output(sock):
+    def handle_output(sock, child):
         connection, client_address = sock.accept()
         gpt = GPT("gpt-4-0125-preview", 0.5)
         initial_message = generate_suggestion(gpt)
         for chunk in initial_message:
             if chunk_text := chunk.choices[0].delta.content:
-                connection.sendall(chunk_text.encode('utf-8'))
+                try:
+                    connection.sendall(chunk_text.encode('utf-8'))
+                except BrokenPipeError:
+                    child.sendcontrol('c')  # Send Ctrl+C to the child process
+                    child.terminate(force=False)  # Try to gracefully terminate the child
+                    sys.exit(0)
         connection.sendall(b"LEAPING_STOP")
 
         exit_command_received = False
@@ -330,16 +335,21 @@ def launch_cli():
             response = gpt.chat_completion(stream=True)
             for chunk in response:
                 if chunk_text := chunk.choices[0].delta.content:
-                    connection.sendall(chunk_text.encode('utf-8'))
+                    try:
+                        connection.sendall(chunk_text.encode('utf-8'))
+                    except BrokenPipeError:
+                        child.sendcontrol('c')  # Send Ctrl+C to the child process
+                        child.terminate(force=False)  # Try to gracefully terminate the child
+                        sys.exit(0)
             connection.sendall(b"LEAPING_STOP")
 
         connection.close()
 
-    thread = threading.Thread(target=handle_output, args=(sock,))
-    thread.start()
-
     child = pexpect.spawn(f"leaping --port {port}")
+    thread = threading.Thread(target=handle_output, args=(sock, child))
+    thread.start()
     child.interact()
+
 
     thread.join()
     sock.close()

@@ -1,11 +1,15 @@
 import argparse
+import select
+import signal
+import sys
 from socket import socket, AF_INET, SOCK_STREAM
 import threading
 import time
-from prompt_toolkit import prompt
 
 global stop_spinner
 stop_spinner = threading.Event()
+
+
 def spinner_animation(message="Loading..."):
     spinner_chars = ['|', '/', '-', '\\']
     idx = 0
@@ -25,8 +29,6 @@ def create_spinner():
 def stop_spinner_animation(spinner_thread):
     stop_spinner.set()
     spinner_thread.join()
-
-
 
 
 def main():
@@ -51,18 +53,37 @@ def main():
     sock = socket(AF_INET, SOCK_STREAM)
     sock.connect(('localhost', args.port))
 
+    sigint_received = False
+
+
+    def signal_handler(sig, frame):
+        global sigint_received
+        sigint_received = True
+        sys.exit(0)
+        sys.exit(0)
+        # You can also initiate cleanup here if needed
+
     spinner = create_spinner()
     stop_sent = False
-    while not stop_sent:
-        response = sock.recv(2048)
-        stop_spinner_animation(spinner)
-        if response == b"LEAPING_STOP":
-            break
-        print(response.decode("utf-8"), end="")
+    sock.setblocking(False)
+    signal.signal(signal.SIGINT, signal_handler)
 
+    def receive_output_from_server():
+        while not stop_sent and not sigint_received:
+            # Check if the socket is ready for reading
+            ready_to_read, _, _ = select.select([sock], [], [], 0.1)
+            if ready_to_read:
+                response = sock.recv(2048)
+                if response:
+                    stop_spinner_animation(spinner)
+                    if response == b"LEAPING_STOP":
+                        break
+                    print(response.decode("utf-8"), end="")
+
+    receive_output_from_server()
 
     while True:
-        user_input = prompt("\nIf the explanation is wrong, say why and we'll try again. Press q to exit: \n> ")
+        user_input = input("\nIf the explanation is wrong, say why and we'll try again. Press q to exit: \n> ")
 
         if user_input.strip() == "q" or user_input.strip() == "exit":
             sock.sendall(b"exit")
@@ -71,10 +92,4 @@ def main():
             continue  # Skip the rest of the loop and prompt again
         sock.sendall(user_input.encode("utf-8"))
         spinner = create_spinner()
-        stop_sent = False
-        while not stop_sent:
-            response = sock.recv(2048)
-            stop_spinner_animation(spinner)
-            if response == b"LEAPING_STOP":
-                break
-            print(response.decode("utf-8"), end="")
+        receive_output_from_server()
