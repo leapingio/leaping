@@ -1,4 +1,3 @@
-
 from models import ExecutionCursor, CallStack, ASTAssignment, RuntimeAssignment
 import ast
 import inspect
@@ -57,12 +56,11 @@ def get_deltas(prev_locals, curr_locals):
 
         if local not in prev_locals:
             deltas.append(RuntimeAssignment(name=local, value=str(val), path=""))
-    
+
     return deltas
 
 
 def create_ast_mapping(parsed_ast, assign_mapping, call_mapping):
-
     def process_node(node):
         if isinstance(node, ast.arguments):
             for arg in node.args:
@@ -112,10 +110,10 @@ def get_function_source_from_frame(frame, method_to_class_source):
                 method = getattr(cls, func_name)
                 source_code = inspect.getsource(method)
                 method_to_class_source[(frame.f_code.co_filename, func_name)] = inspect.getsource(cls)
-    
+
     if not source_code:
         return
-    
+
     dedented_source = textwrap.dedent(source_code)
     return dedented_source
 
@@ -139,28 +137,27 @@ class SimpleTracer:
         self.traceback = None
         self.call_stack_history = []
         self.stack_size = 0
-        self.scope = None 
+        self.scope = None
         self.line_counter = defaultdict(int)
-
 
     def simple_tracer(self, frame, event: str, arg):
         if frame.f_code.co_filename not in self.filename_to_path:
             self.filename_to_path[frame.f_code.co_filename] = os.path.abspath(frame.f_code.co_filename)
-
         current_file = self.filename_to_path[frame.f_code.co_filename]
 
         if frame.f_code.co_filename[0] == "<":
             return
 
-        if current_file.endswith("conftest.py") or current_file.endswith("simpletracer.py"): # todo: change conftest to be in a diff folder to filter out better
+        if current_file.endswith("plugin.py") or current_file.endswith("models.py") or current_file.endswith(
+                "simpletracer.py"):  # todo: change conftest to be in a diff folder to filter out better
             return
-        
+
         if self.scope and (current_file, frame.f_code.co_name) not in self.scope:
             return
 
         if not current_file.startswith(self.project_dir):
             return
-        
+
         self.process_events(frame, event, arg)
 
         return self.simple_tracer
@@ -173,21 +170,23 @@ class SimpleTracer:
             line_no = frame.f_lineno
 
             key = (file_path, func_name, line_no)
-            if self.line_counter[key] > 10: 
+            if self.line_counter[key] > 10:
                 # heuristic to stop tracking deltas once we've hit a line more than 10 times
                 # should clear this dictionary if the functions gets called again separately (clear cache in 'call' event)
                 # todo: 10 is arbitrary, might be tricks to produce a better number
-                return 
-            
+                return
+
             self.line_counter[key] += 1
 
-            if (file_path, func_name) not in self.function_to_source:  # if we haven't yet gotten the source/ast parsed the function
+            if (file_path,
+                func_name) not in self.function_to_source.keys():  # if we haven't yet gotten the source/ast parsed the function
                 source = get_function_source_from_frame(frame, self.method_to_class_source)
 
                 if source:
                     self.function_to_source[(file_path, func_name)] = source
-                    
-                assign_mapping, call_mapping = get_mapping_from_source(source)  # through the AST parsing of the source code, get map of assignments and calls by line number
+
+                assign_mapping, call_mapping = get_mapping_from_source(
+                    source)  # through the AST parsing of the source code, get map of assignments and calls by line number
 
                 if assign_mapping:  # dict of line_no -> list of ASTAssignment objects
                     self.function_to_assign_mapping[(file_path, func_name)] = assign_mapping
@@ -200,7 +199,7 @@ class SimpleTracer:
 
             prev_locals = current_frame.f_locals if current_frame else []
             curr_locals = frame.f_locals
-            
+
             deltas: list[RuntimeAssignment] = get_deltas(prev_locals, curr_locals)
             if deltas:
                 self.function_to_deltas[(file_path, func_name)][relative_line_no].append(deltas)
@@ -209,7 +208,8 @@ class SimpleTracer:
             self.call_stack.new_cursor_in_current_frame(cursor)
 
         if event == "call":
-            arg_deltas: list[RuntimeAssignment] = get_deltas([], frame.f_locals)  # these deltas represent the parameters at the start of a function
+            arg_deltas: list[RuntimeAssignment] = get_deltas([],
+                                                             frame.f_locals)  # these deltas represent the parameters at the start of a function
             if arg_deltas:
                 self.function_to_call_args[(file_path, func_name)].append(arg_deltas)
 
@@ -223,7 +223,7 @@ class SimpleTracer:
     def create_cursor(self, file_path, frame):
         cursor = ExecutionCursor(file_path, frame.f_lineno, frame.f_code.co_name, frame.f_locals)
         return cursor
-    
+
     def get_variable_history(self, variable_name, file_path, func_name, first_line_no, max_depth=1, current_depth=0):
         if current_depth > max_depth:
             return ""
@@ -236,13 +236,14 @@ class SimpleTracer:
                     line = None
                     with open(file_path) as f:
                         line = f.readlines()[first_line_no + line_no - 2].strip()
-                        
+
                     history += f"At line '{line}' in {func_name}, '{delta.name}' was set to {delta.value}"
 
                     if current_depth < max_depth:
                         for dep in self.get_variable_dependencies(variable_name, file_path, func_name):
-                            history += self.get_variable_history(dep, file_path, func_name, max_depth, current_depth + 1)
-                            
+                            history += self.get_variable_history(dep, file_path, func_name, max_depth,
+                                                                 current_depth + 1)
+
         return history
 
     def get_variable_dependencies(self, variable_name, file_path, func_name):

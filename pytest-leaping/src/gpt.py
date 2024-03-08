@@ -29,4 +29,3 @@ class GPT:
         self.add_message("assistant", response_content)
 
         return response_content
-

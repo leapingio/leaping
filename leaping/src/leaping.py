@@ -71,6 +71,10 @@ def main():
             continue  # Skip the rest of the loop and prompt again
         sock.sendall(user_input.encode("utf-8"))
         spinner = create_spinner()
-        response = sock.recv(2048)
-        stop_spinner_animation(spinner)
-        print(response.decode("utf-8"))
+        stop_sent = False
+        while not stop_sent:
+            response = sock.recv(2048)
+            stop_spinner_animation(spinner)
+            if response == b"LEAPING_STOP":
+                break
+            print(response.decode("utf-8"), end="")

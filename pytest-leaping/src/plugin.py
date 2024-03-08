@@ -1,7 +1,5 @@
 from collections import defaultdict
-import os
 import sys
-import signal
 import threading
 from types import CodeType
 
@@ -35,8 +33,26 @@ def pytest_addoption(parser):
 
     parser.addini('HELLO', 'Dummy pytest.ini setting')
 
+
 project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], encoding='utf-8').strip()
 tracer = SimpleTracer(project_dir)
+
+
+def _should_trace(file_name: str, func_name: str) -> bool:
+    leaping_specific_files = [
+        "conftest",
+        "plugin",
+        "models",
+        "gpt",  # TODO: maybe make this LEAPING_ or something less likely to run into collisions
+    ]
+    if "<" in file_name:
+        return False
+    if any(leaping_specific_file in file_name for leaping_specific_file in leaping_specific_files):
+        return False
+
+    if os.path.abspath(file_name).startswith(tracer.project_dir):
+        return True
+    return False
 
 
 def monitor_call_trace(code: CodeType, instruction_offset: int):
@@ -45,14 +61,7 @@ def monitor_call_trace(code: CodeType, instruction_offset: int):
     func_name = code.co_name
 
     if tracer and tracer.test_name in func_name or (tracer and tracer.stack_size > 0):
-        leaping_specific_files = [
-            "conftest",
-            "plugin"
-            "gpt",  # TODO: maybe make this LEAPING_ or something less likely to run into collisions
-        ]
-        if os.path.abspath(code.co_filename).startswith(
-                tracer.project_dir) and "<" not in code.co_filename and "<" not in code.co_name and not any(
-            file in code.co_filename for file in leaping_specific_files):
+        if _should_trace(code.co_filename, func_name):
             tracer.call_stack_history.append((code.co_filename, func_name, "CALL", tracer.stack_size))
             tracer.stack_size += 1
 
@@ -60,8 +69,7 @@ def monitor_call_trace(code: CodeType, instruction_offset: int):
 def monitor_return_trace(code: CodeType, instruction_offset: int, retval: object):
     global tracer
 
-    if tracer and tracer.stack_size > 0 and os.path.abspath(code.co_filename).startswith(
-            tracer.project_dir) and "<" not in code.co_filename and "<" not in code.co_name and "conftest" not in code.co_filename:
+    if tracer and tracer.stack_size > 0 and _should_trace(code.co_filename, code.co_name):
         tracer.call_stack_history.append((code.co_filename, code.co_name, "RETURN", tracer.stack_size))
         tracer.stack_size -= 1
 
@@ -114,8 +122,11 @@ def pytest_runtest_makereport(item, call):
 
 
 def add_deltas(tracer, key, stack, counter_map, line_no, greater_than=False):
-    assignments = tracer.function_to_assign_mapping[key]  # all assignments in that function (which we got from AST parsing)
+    assignments = tracer.function_to_assign_mapping[
+        key]  # all assignments in that function (which we got from AST parsing)
+
     assignments_to_add_line_nos = set()
+
     for assignment_line_no in assignments.keys():
         if greater_than and assignment_line_no > line_no:  # when we want to get all the assignments after line_no
             assignments_to_add_line_nos.add(assignment_line_no)
@@ -128,9 +139,9 @@ def add_deltas(tracer, key, stack, counter_map, line_no, greater_than=False):
             value = None
 
             delta_list = tracer.function_to_deltas[key][assignment_line_no]
-            if not delta_list: 
-                continue 
-            # deltas are runtime assignments, which means that since a function can get executed multiple times during an execution trace, we need to keep a
+            if not delta_list:
+                continue
+                # deltas are runtime assignments, which means that since a function can get executed multiple times during an execution trace, we need to keep a
             # monotonically increasing counter (per function and per line number) to get the right deltas
             delta_index = counter_map[key][assignment_line_no]
             if delta_index >= len(delta_list):  # technically shouldn't get here
@@ -144,23 +155,25 @@ def add_deltas(tracer, key, stack, counter_map, line_no, greater_than=False):
                     break
 
             if value:
-                context_line = tracer.function_to_source[key].split("\n")[assignment_line_no  - 1].strip()
+                context_line = tracer.function_to_source[key].split("\n")[assignment_line_no - 1].strip()
                 stack[-1].children.append(VariableAssignmentNode(var_name, value, context_line))
 
 
 def build_call_hierarchy(tracer):
     trace_data = tracer.call_stack_history
-    function_to_call_mapping = tracer.function_to_call_mapping 
+    function_to_call_mapping = tracer.function_to_call_mapping
     function_to_call_args = tracer.function_to_call_args
 
     file_name, func_name, event_type, _ = trace_data[0]
     root_call = FunctionCallNode(file_name, func_name, [])  # todo: can root level pytest functions have call args?
     stack = [root_call]
 
-    counter_map = defaultdict(lambda: defaultdict(int))  # one function can get called multiple times throughout execution, so we keep an index to figure out which execution # we're at
+    counter_map = defaultdict(lambda: defaultdict(
+        int))  # one function can get called multiple times throughout execution, so we keep an index to figure out which execution # we're at
     last_root_call_line = 0
 
-    for trace_file_name, trace_func_name, event_type, depth in trace_data[1:]:  # sequence of "CALL" and "RETURN" calls gathered from sys.monitoring, representing execution trace
+    for trace_file_name, trace_func_name, event_type, depth in trace_data[
+                                                               1:]:  # sequence of "CALL" and "RETURN" calls gathered from sys.monitoring, representing execution trace
         key = (stack[-1].file_name, stack[-1].func_name)
 
         if event_type == 'CALL':  # strategy here is to create VariableAssignmentObjects for all the lines up to the current call
@@ -168,18 +181,22 @@ def build_call_hierarchy(tracer):
             call_mapping = function_to_call_mapping[key]  # if there is no call mapping, probably out of scope
 
             if call_mapping and call_mapping[trace_func_name]:
-                line_nos = call_mapping[trace_func_name]   # ascending list of line numbers where the function gets called (from AST parsing)
+                line_nos = call_mapping[
+                    trace_func_name]  # ascending list of line numbers where the function gets called (from AST parsing)
                 line_no = line_nos[0]  # grab the first one
                 remaining_line_nos = line_nos[1:]
-                call_mapping[trace_func_name] = remaining_line_nos   # re-assign the rest of the line numbers to the dict such that next time this function gets called, we grab the next line number
-                if not remaining_line_nos and key == (file_name, func_name):  # this means we are the last call within the root function, and we want to save that line number (see add_deltas call after end of loop)
+                call_mapping[
+                    trace_func_name] = remaining_line_nos  # re-assign the rest of the line numbers to the dict such that next time this function gets called, we grab the next line number
+                if not remaining_line_nos and key == (file_name,
+                                                      func_name):  # this means we are the last call within the root function, and we want to save that line number (see add_deltas call after end of loop)
                     last_root_call_line = line_no  # save that line
 
-                add_deltas(tracer, key, stack, counter_map, line_no) 
+                add_deltas(tracer, key, stack, counter_map, line_no)
 
-            call_args_list = function_to_call_args[(trace_file_name, trace_func_name)]   # list of call args
+            call_args_list = function_to_call_args[(trace_file_name, trace_func_name)]  # list of call args
             if call_args_list:
-                new_call = FunctionCallNode(trace_file_name, trace_func_name, call_args_list.pop(0))  # pop off the first item from the list of call args such that next time the list is accessed we'll pop off the 2nd element
+                new_call = FunctionCallNode(trace_file_name, trace_func_name, call_args_list.pop(
+                    0))  # pop off the first item from the list of call args such that next time the list is accessed we'll pop off the 2nd element
             else:
                 new_call = FunctionCallNode(trace_file_name, trace_func_name, [])
 
@@ -189,7 +206,6 @@ def build_call_hierarchy(tracer):
         elif event_type == 'RETURN':
             add_deltas(tracer, key, stack, counter_map, 0, greater_than=True)
             stack.pop()
-
 
     # add the last variable variable assignments in the root func that happen after the last function call within root
     add_deltas(tracer, (file_name, func_name), stack, counter_map, last_root_call_line, greater_than=True)
@@ -204,7 +220,8 @@ def build_call_hierarchy(tracer):
     line_no = frame.f_lineno - frame.f_code.co_firstlineno + 1
     source_code = tracer.function_to_source[(file_path, func_name)]
     error_context_line = source_code.split("\n")[line_no - 1].strip()
-    root_call.children.append(VariableAssignmentNode(tracer.error_type, tracer.error_message, error_context_line))   # todo: this assume the error messages at the root pytest function call. is that true?
+    root_call.children.append(VariableAssignmentNode(tracer.error_type, tracer.error_message,
+                                                     error_context_line))  # todo: this assume the error messages at the root pytest function call. is that true?
 
     return root_call
 
@@ -274,7 +291,6 @@ def launch_cli():
     sock.listen(1)
     port = sock.getsockname()[1]
 
-
     def handle_output(sock):
         connection, client_address = sock.accept()
         gpt = GPT("gpt-4-0125-preview", 0.5)
@@ -293,8 +309,11 @@ def launch_cli():
                 connection.sendall(b"some-traceback-string")
             user_input = data.decode('utf-8')
             gpt.add_message("user", user_input)
-            response = gpt.chat_completion()
-            connection.sendall(response.encode('utf-8'))
+            response = gpt.chat_completion(stream=True)
+            for chunk in response:
+                if chunk_text := chunk.choices[0].delta.content:
+                    connection.sendall(chunk_text.encode('utf-8'))
+            connection.sendall(b"LEAPING_STOP")
 
         connection.close()
 
@@ -318,7 +337,6 @@ def pytest_runtest_protocol(item, nextitem):
 
     tracer.test_duration = time.time() - tracer.test_start
     tracer.test_start = None
-    print(tracer.call_stack_history)
     if test_failed:
         add_scope()
         runtestprotocol(item, nextitem=nextitem, log=False)
@@ -328,5 +346,3 @@ def pytest_runtest_protocol(item, nextitem):
         item.ihook.pytest_runtest_logreport(report=report)
 
     return True
-
-
