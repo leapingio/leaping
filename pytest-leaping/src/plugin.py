@@ -13,11 +13,19 @@ import os
 import time
 from models import FunctionCallNode, VariableAssignmentNode
 
+tracer = SimpleTracer()
+
 
 def pytest_configure(config):
     leaping_option = config.getoption('--leaping')
     if not leaping_option:
         return
+    try:
+        project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], encoding='utf-8').strip()
+    except Exception:
+        project_dir = str(config.rootdir)
+
+    tracer.project_dir = project_dir
     config.option.capture = 'no'  # setting the -s flag
     config.addinivalue_line("filterwarnings", "ignore")
 
@@ -32,10 +40,6 @@ def pytest_addoption(parser):
     )
 
     parser.addini('HELLO', 'Dummy pytest.ini setting')
-
-
-project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], encoding='utf-8').strip()
-tracer = SimpleTracer(project_dir)
 
 
 def _should_trace(file_name: str, func_name: str) -> bool:
@@ -92,6 +96,9 @@ def pytest_runtest_setup(item):
 
 
 def pytest_runtest_teardown(item, nextitem):
+    leaping_option = item.config.getoption('--leaping')
+    if not leaping_option:
+        return
     sys.settrace(None)
     sys.monitoring.free_tool_id(3)
 
@@ -108,9 +115,9 @@ If you are certain about the root cause, describe it as tersely as possible, in 
 
 
 def pytest_runtest_makereport(item, call):
-    # leaping_option = item.config.getoption('--leaping')
-    # if not leaping_option:
-    #     return
+    leaping_option = item.config.getoption('--leaping')
+    if not leaping_option:
+        return
     global tracer
 
     if call.excinfo is not None:

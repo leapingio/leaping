@@ -119,8 +119,8 @@ def get_function_source_from_frame(frame, method_to_class_source):
 
 
 class SimpleTracer:
-    def __init__(self, project_dir):
-        self.project_dir = project_dir
+    def __init__(self):
+        self.project_dir = ""
         self.call_stack = CallStack()
         self.test_name = None
         self.test_start = None
