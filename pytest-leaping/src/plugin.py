@@ -133,6 +133,8 @@ def add_deltas(tracer, key, stack, counter_map, line_no, greater_than=False):
         key]  # all assignments in that function (which we got from AST parsing)
 
     assignments_to_add_line_nos = set()
+    if not assignments:
+        return
 
     for assignment_line_no in assignments.keys():
         if greater_than and assignment_line_no > line_no:  # when we want to get all the assignments after line_no
@@ -312,6 +314,7 @@ def launch_cli():
             data = connection.recv(2048)
             if data == b'exit':
                 exit_command_received = True
+                break
             if data == b"get_traceback":
                 connection.sendall(b"some-traceback-string")
             user_input = data.decode('utf-8')

@@ -62,7 +62,7 @@ def main():
 
 
     while True:
-        user_input = prompt("If the explanation is wrong, say why and we'll try again. Press q to exit: \n> ")
+        user_input = prompt("\nIf the explanation is wrong, say why and we'll try again. Press q to exit: \n> ")
 
         if user_input.strip() == "q" or user_input.strip() == "exit":
             sock.sendall(b"exit")
