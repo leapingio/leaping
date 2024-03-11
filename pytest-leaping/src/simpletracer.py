@@ -152,6 +152,9 @@ class SimpleTracer:
                 "simpletracer.py"):  # todo: change conftest to be in a diff folder to filter out better
             return
 
+        if (".pyenv" in current_file) or ("site-packages" in current_file):
+            return
+
         if self.scope and (current_file, frame.f_code.co_name) not in self.scope:
             return
 
@@ -185,13 +188,13 @@ class SimpleTracer:
                 if source:
                     self.function_to_source[(file_path, func_name)] = source
 
-                assign_mapping, call_mapping = get_mapping_from_source(
-                    source)  # through the AST parsing of the source code, get map of assignments and calls by line number
+                    assign_mapping, call_mapping = get_mapping_from_source(
+                        source)  # through the AST parsing of the source code, get map of assignments and calls by line number
 
-                if assign_mapping:  # dict of line_no -> list of ASTAssignment objects
-                    self.function_to_assign_mapping[(file_path, func_name)] = assign_mapping
-                if call_mapping:  # dict of the name of a function being called -> list of line_no (since a function can be called at multiple lines within the same function)
-                    self.function_to_call_mapping[(file_path, func_name)] = call_mapping
+                    if assign_mapping:  # dict of line_no -> list of ASTAssignment objects
+                        self.function_to_assign_mapping[(file_path, func_name)] = assign_mapping
+                    if call_mapping:  # dict of the name of a function being called -> list of line_no (since a function can be called at multiple lines within the same function)
+                        self.function_to_call_mapping[(file_path, func_name)] = call_mapping
 
             relative_line_no = line_no - frame.f_code.co_firstlineno
 

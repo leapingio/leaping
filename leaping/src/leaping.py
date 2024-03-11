@@ -14,7 +14,7 @@ def spinner_animation(message="Loading..."):
     spinner_chars = ['|', '/', '-', '\\']
     idx = 0
     while not stop_spinner.is_set():
-        print(f"\r{message} {spinner_chars[idx % len(spinner_chars)]}", end='')
+        print(f"\r{message} \U0001F914 {spinner_chars[idx % len(spinner_chars)]}", end='')
         idx += 1
         time.sleep(0.1)
     print('\r', end='')
@@ -78,12 +78,13 @@ def main():
                     stop_spinner_animation(spinner)
                     if response == b"LEAPING_STOP":
                         break
-                    print(response.decode("utf-8"), end="")
+                    print(f"\033[90m{response.decode('utf-8')}\033[0m", end="")
 
     receive_output_from_server()
+    print("\n")
 
     while True:
-        user_input = input("\nIf the explanation is wrong, say why and we'll try again. Press q to exit: \n> ")
+        user_input = input("\n If the explanation is wrong, say why and we'll try again. Press q to exit:  \n> ")
 
         if user_input.strip() == "q" or user_input.strip() == "exit":
             sock.sendall(b"exit")

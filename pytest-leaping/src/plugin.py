@@ -1,3 +1,4 @@
+import traceback
 from collections import defaultdict
 import sys
 import threading
@@ -47,7 +48,6 @@ def pytest_addoption(parser):
         help='Enable Leaping for failed tests'
     )
 
-    parser.addini('HELLO', 'Dummy pytest.ini setting')
 
 
 def _should_trace(file_name: str, func_name: str) -> bool:
@@ -60,6 +60,9 @@ def _should_trace(file_name: str, func_name: str) -> bool:
     if "<" in file_name:
         return False
     if any(leaping_specific_file in file_name for leaping_specific_file in leaping_specific_files):
+        return False
+
+    if (".pyenv" in file_name) or (".venv" in file_name):
         return False
 
     if os.path.abspath(file_name).startswith(tracer.project_dir):
@@ -122,7 +125,11 @@ Here's the source code that we got the trace from:
 
 {}
 
-If you are certain about the root cause, describe it as tersely as possible, in a single sentence. Don't start the sentence with 'The root cause of the error is', just say what it is."""
+If you are certain about the root cause, describe it as tersely as possible, in a single sentence. Don't start the sentence with 'The root cause of the error is', just say what it is.
+
+In addition, please output the exact series of steps that occurred to get to the erroring state, with their associated places in code.
+
+"""
 
 
 def pytest_runtest_makereport(item, call):
@@ -183,7 +190,6 @@ def build_call_hierarchy(tracer):
     trace_data = tracer.call_stack_history
     function_to_call_mapping = tracer.function_to_call_mapping
     function_to_call_args = tracer.function_to_call_args
-
     file_name, func_name, event_type, _ = trace_data[0]
     root_call = FunctionCallNode(file_name, func_name, [])  # todo: can root level pytest functions have call args?
     stack = [root_call]
@@ -238,7 +244,11 @@ def build_call_hierarchy(tracer):
     file_path = frame.f_code.co_filename
     func_name = frame.f_code.co_name
     line_no = frame.f_lineno - frame.f_code.co_firstlineno + 1
-    source_code = tracer.function_to_source[(file_path, func_name)]
+    try:
+        source_code = tracer.function_to_source[(file_path, func_name)]
+    except KeyError: # we've likely hit library code
+        return root_call
+
     error_context_line = source_code.split("\n")[line_no - 1].strip()
     root_call.children.append(VariableAssignmentNode(tracer.error_type, tracer.error_message,
                                                      error_context_line))  # todo: this assume the error messages at the root pytest function call. is that true?
@@ -265,7 +275,6 @@ def output_call_hierarchy(nodes, output, indent=0):
 
 def generate_suggestion(gpt: GPT):
     global tracer
-
     root = build_call_hierarchy(tracer)
     output = []
     output_call_hierarchy([root], output)
@@ -274,10 +283,13 @@ def generate_suggestion(gpt: GPT):
 
     for key in tracer.scope:
         func_source = None
-        if key in tracer.method_to_class_source:
-            func_source = tracer.method_to_class_source[key]
-        else:
-            func_source = tracer.function_to_source[key]
+        try:
+            if key in tracer.method_to_class_source:
+                func_source = tracer.method_to_class_source[key]
+            else:
+                func_source = tracer.function_to_source[key]
+        except KeyError:
+            pass
 
         if func_source:
             source_text += func_source + "\n\n"
@@ -315,6 +327,15 @@ def launch_cli():
         connection, client_address = sock.accept()
         gpt = GPT("gpt-4-0125-preview", 0.5)
         initial_message = generate_suggestion(gpt)
+        error_type = tracer.error_type
+        error_message = tracer.error_message
+        traceback_obj = tracer.traceback
+        exception_str = "".join(traceback.format_exception_only(error_type, error_message))
+
+        connection.sendall(b"\033[0mInvestigating the following error:\n")
+        connection.sendall(f"{str(exception_str)} \n".encode('utf-8'))
+
+
         for chunk in initial_message:
             if chunk_text := chunk.choices[0].delta.content:
                 try:
@@ -329,7 +350,6 @@ def launch_cli():
         while not exit_command_received:
             data = connection.recv(2048)
             if data == b'exit':
-                exit_command_received = True
                 break
             if data == b"get_traceback":
                 connection.sendall(b"some-traceback-string")
@@ -352,13 +372,13 @@ def launch_cli():
     thread = threading.Thread(target=handle_output, args=(sock, child))
     thread.start()
     child.interact()
-
-
     thread.join()
     sock.close()
 
 
 def pytest_runtest_protocol(item, nextitem):
+    global tracer
+    
     leaping_option = item.config.getoption('leaping')
     if not leaping_option:
         return
@@ -375,5 +395,6 @@ def pytest_runtest_protocol(item, nextitem):
 
     for report in reports:
         item.ihook.pytest_runtest_logreport(report=report)
+
 
     return True
