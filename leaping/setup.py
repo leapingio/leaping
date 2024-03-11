@@ -10,7 +10,7 @@ setup(
     },
     python_requires='>=3.12',
     install_requires=[
-        "pytest-leaping==0.1.5",
+        "pytest-leaping==0.1.6",
         "prompt_toolkit==3.0.20",
         "openai==1.12.0"
     ],

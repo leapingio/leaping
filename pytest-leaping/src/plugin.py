@@ -87,6 +87,9 @@ def monitor_return_trace(code: CodeType, instruction_offset: int, retval: object
 
 
 def pytest_runtest_setup(item):
+    if not item.config.getoption('--leaping'):
+        return
+
     global tracer
 
     tracer.test_name = item.name
