@@ -134,6 +134,16 @@ In addition, please output the exact series of steps that occurred to get to the
 
 """
 
+test_passing_prompt = """The test passed. Here's the trace:
+{}
+
+Here's the source code that we got the trace from:
+{}
+
+Please output the exact series of steps that occurred to get to the passing state, with their associated places in code. For all questions that I ask going forward, please back up your claims 
+with the exact series of steps that occurred to get to the state you are describing, with their associated places in code.
+"""
+
 
 def pytest_runtest_makereport(item, call):
     leaping_option = item.config.getoption('--leaping')
@@ -242,20 +252,21 @@ def build_call_hierarchy(tracer):
 
     # add the erroring line to the trace
     traceback = tracer.traceback
-    while traceback.tb_next:
-        traceback = traceback.tb_next
-    frame = traceback.tb_frame
-    file_path = frame.f_code.co_filename
-    func_name = frame.f_code.co_name
-    line_no = frame.f_lineno - frame.f_code.co_firstlineno + 1
-    try:
-        source_code = tracer.function_to_source[(file_path, func_name)]
-    except KeyError: # we've likely hit library code
-        return root_call
+    if traceback:
+        while traceback.tb_next:
+            traceback = traceback.tb_next
+        frame = traceback.tb_frame
+        file_path = frame.f_code.co_filename
+        func_name = frame.f_code.co_name
+        line_no = frame.f_lineno - frame.f_code.co_firstlineno + 1
+        try:
+            source_code = tracer.function_to_source[(file_path, func_name)]
+        except KeyError: # we've likely hit library code
+            return root_call
 
-    error_context_line = source_code.split("\n")[line_no - 1].strip()
-    root_call.children.append(VariableAssignmentNode(tracer.error_type, tracer.error_message,
-                                                     error_context_line))  # todo: this assume the error messages at the root pytest function call. is that true?
+        error_context_line = source_code.split("\n")[line_no - 1].strip()
+        root_call.children.append(VariableAssignmentNode(tracer.error_type, tracer.error_message,
+                                                         error_context_line))  # todo: this assume the error messages at the root pytest function call. is that true?
 
     return root_call
 
@@ -277,28 +288,45 @@ def output_call_hierarchy(nodes, output, indent=0):
             output.append(line)
 
 
-def generate_suggestion(gpt: GPT):
+def generate_suggestion(gpt: GPT, test_failed: bool):
     global tracer
     root = build_call_hierarchy(tracer)
     output = []
     output_call_hierarchy([root], output)
 
     source_text = ""
+    if tracer.scope:
+        for key in tracer.scope:
+            func_source = None
+            try:
+                if key in tracer.method_to_class_source:
+                    func_source = tracer.method_to_class_source[key]
+                else:
+                    func_source = tracer.function_to_source[key]
+            except KeyError:
+                pass
 
-    for key in tracer.scope:
-        func_source = None
-        try:
-            if key in tracer.method_to_class_source:
-                func_source = tracer.method_to_class_source[key]
-            else:
-                func_source = tracer.function_to_source[key]
-        except KeyError:
-            pass
-
+            if func_source:
+                source_text += func_source + "\n\n"
+    else:
+        for file_path, func_name, _, _ in tracer.call_stack_history:
+            key = (file_path, func_name)
+            try:
+                if key in tracer.method_to_class_source:
+                    func_source = tracer.method_to_class_source[key]
+                else:
+                    func_source = tracer.function_to_source[key]
+            except KeyError:
+                pass
         if func_source:
             source_text += func_source + "\n\n"
 
-    prompt = error_context_prompt.format("\n".join(output), source_text)
+
+    if test_failed:
+        prompt = error_context_prompt.format("\n".join(output), source_text)
+    else:
+        prompt = test_passing_prompt.format("\n".join(output), source_text)
+
 
     gpt.add_message("user", prompt)
     response = gpt.chat_completion(stream=True)
@@ -320,7 +348,7 @@ def add_scope():
     tracer.scope = scope
 
 
-def launch_cli():
+def launch_cli(test_failed: bool):
     import socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(('localhost', 0))  # let the os pick a port
@@ -330,14 +358,14 @@ def launch_cli():
     def handle_output(sock, child):
         connection, client_address = sock.accept()
         gpt = GPT("gpt-4-0125-preview", 0.5)
-        initial_message = generate_suggestion(gpt)
-        error_type = tracer.error_type
-        error_message = tracer.error_message
-        traceback_obj = tracer.traceback
-        exception_str = "".join(traceback.format_exception_only(error_type, error_message))
+        initial_message = generate_suggestion(gpt, test_failed)
+        if traceback_obj := tracer.traceback:
+            error_type = tracer.error_type
+            error_message = tracer.error_message
+            exception_str = "".join(traceback.format_exception_only(error_type, error_message))
 
-        connection.sendall(b"\033[0mInvestigating the following error:\n")
-        connection.sendall(f"{str(exception_str)} \n".encode('utf-8'))
+            connection.sendall(b"\033[0mInvestigating the following error:\n")
+            connection.sendall(f"{str(exception_str)} \n".encode('utf-8'))
 
 
         for chunk in initial_message:
@@ -392,10 +420,9 @@ def pytest_runtest_protocol(item, nextitem):
 
     tracer.test_duration = time.time() - tracer.test_start
     tracer.test_start = None
-    if test_failed:
-        add_scope()
-        runtestprotocol(item, nextitem=nextitem, log=False)
-        launch_cli()
+    add_scope()
+    runtestprotocol(item, nextitem=nextitem, log=False)
+    launch_cli(test_failed)
 
     for report in reports:
         item.ihook.pytest_runtest_logreport(report=report)
