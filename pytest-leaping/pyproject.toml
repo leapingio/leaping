@@ -7,9 +7,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pytest-leaping"
 description = "A simple plugin to use with pytest"
-version = "0.1.6"
+version = "0.1.7"
 readme = "README.rst"
-requires-python = ">=3.12"
+requires-python = ">=3.0"
 authors = [
     { name = "Leaping Labs Inc.", email = "founders@leaping.io" },
 ]

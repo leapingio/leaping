@@ -139,6 +139,7 @@ class SimpleTracer:
         self.stack_size = 0
         self.scope = None
         self.line_counter = defaultdict(int)
+        self.monitoring_possible = False
 
     def simple_tracer(self, frame, event: str, arg):
         if frame.f_code.co_filename not in self.filename_to_path:
@@ -147,7 +148,6 @@ class SimpleTracer:
 
         if frame.f_code.co_filename[0] == "<":
             return
-
         if current_file.endswith("plugin.py") or current_file.endswith("models.py") or current_file.endswith(
                 "simpletracer.py"):  # todo: change conftest to be in a diff folder to filter out better
             return
@@ -155,11 +155,12 @@ class SimpleTracer:
         if (".pyenv" in current_file) or ("site-packages" in current_file):
             return
 
-        if self.scope and (current_file, frame.f_code.co_name) not in self.scope:
+        if not self.monitoring_possible and self.scope and (current_file, frame.f_code.co_name) not in self.scope:
             return
 
         if not current_file.startswith(self.project_dir):
             return
+
 
         self.process_events(frame, event, arg)
 
@@ -211,6 +212,9 @@ class SimpleTracer:
             self.call_stack.new_cursor_in_current_frame(cursor)
 
         if event == "call":
+            if self.monitoring_possible:
+                self.stack_size += 1
+                self.call_stack_history.append((file_path, func_name, "CALL", self.stack_size))
             arg_deltas: list[RuntimeAssignment] = get_deltas([],
                                                              frame.f_locals)  # these deltas represent the parameters at the start of a function
             if arg_deltas:
@@ -220,8 +224,10 @@ class SimpleTracer:
             self.call_stack.enter_frame(cursor)
 
         if event == "return":
+            self.stack_size -= 1
+            if self.monitoring_possible:
+                self.call_stack_history.append((file_path, func_name, "RETURN", self.stack_size))
             self.call_stack.exit_frame()
-            cursor = self.create_cursor(file_path, frame)
 
     def create_cursor(self, file_path, frame):
         cursor = ExecutionCursor(file_path, frame.f_lineno, frame.f_code.co_name, frame.f_locals)

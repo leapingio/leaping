@@ -78,7 +78,7 @@ def main():
                     stop_spinner_animation(spinner)
                     if response == b"LEAPING_STOP":
                         break
-                    print(f"\033[90m{response.decode('utf-8')}\033[0m", end="")
+                    print(f"\033[61m{response.decode('utf-8')}\033[0m", end="")
 
     receive_output_from_server()
     print("\n")

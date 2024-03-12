@@ -17,7 +17,6 @@ from _pytest.capture import MultiCapture
 
 tracer = SimpleTracer()
 
-
 def pytest_configure(config):
     leaping_option = config.getoption('--leaping')
     if not leaping_option:
@@ -98,15 +97,18 @@ def pytest_runtest_setup(item):
     tracer.test_name = item.name
     tracer.test_start = time.time()
 
-    sys.monitoring.use_tool_id(3, "Tracer")
-
-    if tracer.scope:
+    if tracer.scope or tracer.monitoring_possible:
         sys.settrace(tracer.simple_tracer)
-    else:
+        return
+    elif sys.version_info >= (3, 12):
+        sys.monitoring.use_tool_id(3, "Tracer")
         sys.monitoring.register_callback(3, sys.monitoring.events.PY_START, monitor_call_trace)
         sys.monitoring.register_callback(3, sys.monitoring.events.PY_RETURN, monitor_return_trace)
 
-    sys.monitoring.set_events(3, sys.monitoring.events.PY_START | sys.monitoring.events.PY_RETURN)
+        sys.monitoring.set_events(3, sys.monitoring.events.PY_START | sys.monitoring.events.PY_RETURN)
+
+    if sys.version_info < (3, 12):
+        tracer.monitoring_possible = True
 
 
 def pytest_runtest_teardown(item, nextitem):
@@ -114,7 +116,8 @@ def pytest_runtest_teardown(item, nextitem):
     if not leaping_option:
         return
     sys.settrace(None)
-    sys.monitoring.free_tool_id(3)
+    if sys.version_info >= (3, 12):
+        sys.monitoring.free_tool_id(3)
 
 
 error_context_prompt = """I got an error. Here's the trace:
@@ -183,7 +186,8 @@ def add_deltas(tracer, key, stack, counter_map, line_no, greater_than=False):
 
             if value:
                 context_line = tracer.function_to_source[key].split("\n")[assignment_line_no - 1].strip()
-                stack[-1].children.append(VariableAssignmentNode(var_name, value, context_line))
+                if len(stack) != 0:
+                    stack[-1].children.append(VariableAssignmentNode(var_name, value, context_line))
 
 
 def build_call_hierarchy(tracer):
@@ -233,7 +237,7 @@ def build_call_hierarchy(tracer):
             add_deltas(tracer, key, stack, counter_map, 0, greater_than=True)
             stack.pop()
 
-    # add the last variable variable assignments in the root func that happen after the last function call within root
+    # add the last variable assignments in the root func that happen after the last function call within root
     add_deltas(tracer, (file_name, func_name), stack, counter_map, last_root_call_line, greater_than=True)
 
     # add the erroring line to the trace
