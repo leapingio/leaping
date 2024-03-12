@@ -17,12 +17,13 @@ from _pytest.capture import MultiCapture
 
 tracer = SimpleTracer()
 
+
 def pytest_configure(config):
     leaping_option = config.getoption('--leaping')
     if not leaping_option:
         return
 
-    capture_manager = config.pluginmanager.getplugin('capturemanager')   # force the -s option
+    capture_manager = config.pluginmanager.getplugin('capturemanager')  # force the -s option
     if capture_manager._global_capturing is not None:
         capture_manager._global_capturing.pop_outerr_to_orig()
         capture_manager._global_capturing.stop_capturing()
@@ -34,7 +35,7 @@ def pytest_configure(config):
         project_dir = str(config.rootdir)
 
     tracer.project_dir = project_dir
-    
+
     config.addinivalue_line("filterwarnings", "ignore")
 
 
@@ -47,6 +48,12 @@ def pytest_addoption(parser):
         help='Enable Leaping for failed tests'
     )
 
+
+def pytest_collection_modifyitems(config, items):
+    if not config.getoption('--leaping'):
+        return
+    total_tests_collected = len(items)
+    setattr(config, 'total_tests_collected', total_tests_collected)
 
 
 def _should_trace(file_name: str, func_name: str) -> bool:
@@ -261,7 +268,7 @@ def build_call_hierarchy(tracer):
         line_no = frame.f_lineno - frame.f_code.co_firstlineno + 1
         try:
             source_code = tracer.function_to_source[(file_path, func_name)]
-        except KeyError: # we've likely hit library code
+        except KeyError:  # we've likely hit library code
             return root_call
 
         error_context_line = source_code.split("\n")[line_no - 1].strip()
@@ -321,12 +328,10 @@ def generate_suggestion(gpt: GPT, test_failed: bool):
         if func_source:
             source_text += func_source + "\n\n"
 
-
     if test_failed:
         prompt = error_context_prompt.format("\n".join(output), source_text)
     else:
         prompt = test_passing_prompt.format("\n".join(output), source_text)
-
 
     gpt.add_message("user", prompt)
     response = gpt.chat_completion(stream=True)
@@ -366,7 +371,6 @@ def launch_cli(test_failed: bool):
 
             connection.sendall(b"\033[0mInvestigating the following error:\n")
             connection.sendall(f"{str(exception_str)} \n".encode('utf-8'))
-
 
         for chunk in initial_message:
             if chunk_text := chunk.choices[0].delta.content:
@@ -410,13 +414,16 @@ def launch_cli(test_failed: bool):
 
 def pytest_runtest_protocol(item, nextitem):
     global tracer
-    
+
     leaping_option = item.config.getoption('leaping')
     if not leaping_option:
         return
     reports = runtestprotocol(item, nextitem=nextitem, log=False)
 
     test_failed = any(report.failed for report in reports if report.when == 'call')
+
+    if not test_failed and item.config.total_tests_collected > 1:  # Only run leaping on passing tests if explicitly requested
+        return None
 
     tracer.test_duration = time.time() - tracer.test_start
     tracer.test_start = None
@@ -426,6 +433,5 @@ def pytest_runtest_protocol(item, nextitem):
 
     for report in reports:
         item.ihook.pytest_runtest_logreport(report=report)
-
 
     return True

@@ -15,6 +15,7 @@ def func(x):
 
     return z + p.x
 
+
 def func2(y):
     a = y * 2
     return func(a)
@@ -25,5 +26,5 @@ def test_failure():
     k = 5
     for i in range(300000):
         i ^= 2
-    x = 3 / (val-26)
+    x = 3 / (val - 26)
     assert val == 4
