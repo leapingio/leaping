@@ -325,8 +325,8 @@ def generate_suggestion(gpt: GPT, test_failed: bool):
                     func_source = tracer.function_to_source[key]
             except KeyError:
                 pass
-        if func_source:
-            source_text += func_source + "\n\n"
+            if func_source:
+                source_text += func_source + "\n\n"
 
     if test_failed:
         prompt = error_context_prompt.format("\n".join(output), source_text)
