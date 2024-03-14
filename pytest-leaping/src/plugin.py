@@ -16,12 +16,16 @@ from models import FunctionCallNode, VariableAssignmentNode
 from _pytest.capture import MultiCapture
 
 tracer = SimpleTracer()
+in_server_mode = False
 
 
 def pytest_configure(config):
     leaping_option = config.getoption('--leaping')
     if not leaping_option:
         return
+
+    # Somewhere here, say that we're going into the hit our own server mode
+
 
     capture_manager = config.pluginmanager.getplugin('capturemanager')  # force the -s option
     if capture_manager._global_capturing is not None:
@@ -33,6 +37,19 @@ def pytest_configure(config):
         project_dir = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], encoding='utf-8').strip()
     except Exception:
         project_dir = str(config.rootdir)
+
+
+    while True:
+        # TODO: fix copy
+        user_input = input("Would you like to run Leaping in server mode? (yes/no)")
+        if user_input.lower() in ['yes', 'no']:
+            if user_input.lower() == 'yes':
+                global in_server_mode
+                in_server_mode = True
+            break
+        else:
+            print("Invalid input. Please enter 'yes' or 'no'.")
+
 
     tracer.project_dir = project_dir
 
@@ -315,7 +332,7 @@ def generate_suggestion(gpt: GPT, test_failed: bool):
 
             if func_source:
                 source_text += func_source + "\n\n"
-    else:
+    else:  # case for < 3.12
         for file_path, func_name, _, _ in tracer.call_stack_history:
             key = (file_path, func_name)
             try:
@@ -328,15 +345,14 @@ def generate_suggestion(gpt: GPT, test_failed: bool):
             if func_source:
                 source_text += func_source + "\n\n"
 
+
     if test_failed:
         prompt = error_context_prompt.format("\n".join(output), source_text)
     else:
         prompt = test_passing_prompt.format("\n".join(output), source_text)
 
     gpt.add_message("user", prompt)
-    response = gpt.chat_completion(stream=True)
-
-    return response
+    return gpt.chat_completion(stream=True)
 
 
 # Before re-running failed test, need to add scope information to tracer so that we can instrument the re-run
@@ -362,7 +378,7 @@ def launch_cli(test_failed: bool):
 
     def handle_output(sock, child):
         connection, client_address = sock.accept()
-        gpt = GPT("gpt-4-0125-preview", 0.5)
+        gpt = GPT("gpt-4-0125-preview", 0.5, in_server_mode)
         initial_message = generate_suggestion(gpt, test_failed)
         if traceback_obj := tracer.traceback:
             error_type = tracer.error_type
@@ -371,15 +387,13 @@ def launch_cli(test_failed: bool):
 
             connection.sendall(b"\033[0mInvestigating the following error:\n")
             connection.sendall(f"{str(exception_str)} \n".encode('utf-8'))
-
         for chunk in initial_message:
-            if chunk_text := chunk.choices[0].delta.content:
-                try:
-                    connection.sendall(chunk_text.encode('utf-8'))
-                except BrokenPipeError:
-                    child.sendcontrol('c')  # Send Ctrl+C to the child process
-                    child.terminate(force=False)  # Try to gracefully terminate the child
-                    sys.exit(0)
+            try:
+                connection.sendall(chunk.encode('utf-8'))
+            except BrokenPipeError:
+                child.sendcontrol('c')  # Send Ctrl+C to the child process
+                child.terminate(force=False)  # Try to gracefully terminate the child
+                sys.exit(0)
         connection.sendall(b"LEAPING_STOP")
 
         exit_command_received = False
@@ -387,19 +401,16 @@ def launch_cli(test_failed: bool):
             data = connection.recv(2048)
             if data == b'exit':
                 break
-            if data == b"get_traceback":
-                connection.sendall(b"some-traceback-string")
             user_input = data.decode('utf-8')
             gpt.add_message("user", user_input)
             response = gpt.chat_completion(stream=True)
             for chunk in response:
-                if chunk_text := chunk.choices[0].delta.content:
-                    try:
-                        connection.sendall(chunk_text.encode('utf-8'))
-                    except BrokenPipeError:
-                        child.sendcontrol('c')  # Send Ctrl+C to the child process
-                        child.terminate(force=False)  # Try to gracefully terminate the child
-                        sys.exit(0)
+                try:
+                    connection.sendall(chunk.encode('utf-8'))
+                except BrokenPipeError:
+                    child.sendcontrol('c')  # Send Ctrl+C to the child process
+                    child.terminate(force=False)  # Try to gracefully terminate the child
+                    sys.exit(0)
             connection.sendall(b"LEAPING_STOP")
 
         connection.close()
