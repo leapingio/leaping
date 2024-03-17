@@ -1,25 +1,24 @@
-In root:
-`pip install -r requirements.txt`\
-`uvicorn backend.main:app `
-NOTE: Please ensure that you're using `uvicorn[standard]` and not `uvicorn` since we've seen the latter result in some socket errors
+# Leaping
 
-In backend:
-Please copy  `.env.example` to `.env` and ensure that all the variables in the `.env` file are set correctly.\
-For the github token, please follow [these instructions](https://docs.github.com/en/github/authenticating-to-github/creating-a-personal-access-token) to create a token and set it in the `.env` file.
+Leaping's pytest debugger is a simple, fast and lightweight omniscient debugger for Python. Leaping traces the execution of your code
+and allows you to retroactively inspect the state of your program at any time, using an LLM-based debugger with natural language.
+
+# Installation
+``pip install leaping``
+
+# Usage
+``
+pytest --leaping
+``  
+
+By default, pytest automatically discovers all the python tests within your project and runs them.
+
+# Features
+You can ask Leaping questions like:
+- What was the value of variable x at this point?
+- Why was variable y set to this value?
+- Why am I not hitting function x?
+- What changes can I make to this code to make this test pass?
 
 
-In a new terminal:\
-`cd frontend`\
-`npm run dev`
 
-Frontend: http://localhost:5173
-
-Stack trace to paste in:
-
-Traceback (most recent call last):\
-&nbsp;&nbsp;&nbsp;&nbsp;File "/Users/adrien/hndemo/backend/example.py", line 127, in <module>\
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;pay_for_day(emp_id, '2024-02-29')\
-&nbsp;&nbsp;&nbsp;&nbsp;File "/Users/adrien/hndemo/backend/example.py", line 114, in pay_for_day\
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if result.is_weekend:\
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;^^^^^^^^^^^^^^^^^\
-  AttributeError: 'NoneType' object has no attribute 'is_weekend'
