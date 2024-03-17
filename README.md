@@ -3,7 +3,7 @@
 Leaping's pytest debugger is a simple, fast and lightweight omniscient debugger for Python. Leaping traces the execution of your code
 and allows you to retroactively inspect the state of your program at any time, using an LLM-based debugger with natural language. 
 
-It does this by keeping track of all of the variable changes, 
+It does this by keeping track of all of the variable changes and other sources of non-determinism from within your code. 
 
 # Installation
 - ``pip install leaping``
