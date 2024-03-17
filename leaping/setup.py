@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="leaping",
-    version="0.1.7",
+    version="0.1.8",
     entry_points={
         'console_scripts': [
             'leaping=leaping:main',

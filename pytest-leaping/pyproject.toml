@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pytest-leaping"
 description = "A simple plugin to use with pytest"
-version = "0.1.7"
+version = "0.1.8"
 readme = "README.rst"
 requires-python = ">=3.0"
 authors = [
@@ -37,6 +37,8 @@ classifiers = [
 dependencies = [
     "pytest>=6.2.0",
     "pexpect==4.9.0",
+    "posthog==3.5.0",
+    "openai>=1.10.0"
 ]
 [project.urls]
 Repository = "https://github.com/leaping/pytest-leaping"

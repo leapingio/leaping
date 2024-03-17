@@ -1,13 +1,11 @@
 import dataclasses
-import json
 import subprocess
 import socket
-import time
 
-import httpx
 import requests
 
 LEAPING_BASE_URL = "http://127.0.0.1:8000/"
+
 
 @dataclasses.dataclass
 class ProcessGPTRequest:
@@ -18,6 +16,7 @@ class ProcessGPTRequest:
 
     def to_json(self):
         return dataclasses.asdict(self)
+
 
 class LeapingServer:
     @staticmethod
