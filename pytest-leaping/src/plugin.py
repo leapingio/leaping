@@ -399,7 +399,16 @@ def generate_suggestion(gpt: GPT, test_failed: bool):
 
 
     if test_failed:
-        prompt = error_context_prompt.format("\n".join(output), source_text)
+        output_string = ""
+
+        num_tokens = sum([len(line) for line in output]) / 4      
+        if num_tokens > 10000:  # $10 per million tokens, limit to 10 cents, so 10000 tokens max
+            output_index_within_limit = len(output) - int(len(output) * 10000/num_tokens)
+            output_string = "\n".join(output[output_index_within_limit:])
+        else:
+            output_string = "\n".join(output)
+
+        prompt = error_context_prompt.format(output_string, source_text)
     else:
         prompt = test_passing_prompt.format("\n".join(output), source_text)
 
