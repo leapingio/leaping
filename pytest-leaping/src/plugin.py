@@ -218,7 +218,11 @@ def add_deltas(tracer, key, stack, counter_map, line_no, greater_than=False):
         for ast_assignment in assignments[assignment_line_no]:  # all the ast assignments at that line number
             var_name = ast_assignment.name
             value = None
-            delta_list = tracer.function_to_deltas[key][counter_map[key]]
+            delta_list = None
+            if counter_map[key] < len(tracer.function_to_deltas[key]):
+                delta_list = tracer.function_to_deltas[key][counter_map[key]]
+            elif tracer.function_to_deltas[key]:  # this should only get hit to accomodate the case of last root function assignments (root call funcs should only be called once in an execution)
+                delta_list = tracer.function_to_deltas[key][-1]
 
             if not delta_list:
                 continue
@@ -258,18 +262,13 @@ def add_deltas(tracer, key, stack, counter_map, line_no, greater_than=False):
                     stack[-1].children.append(VariableAssignmentNode(var_name, value_string, context_line))
 
 
-def build_call_hierarchy(tracer):
-    trace_data = tracer.call_stack_history
-    function_to_call_mapping = tracer.function_to_call_mapping
-    function_to_call_args = tracer.function_to_call_args
-    file_name, func_name, event_type, _ = trace_data[0]
-    root_call = FunctionCallNode(file_name, func_name, [])  # todo: can root level pytest functions have call args?
-    stack = [root_call]
-
-    counter_map = defaultdict(int)  # one function can get called multiple times throughout execution, so we keep an index to figure out which execution number we're at
+def build_call_hierarchy_interval(stack, trace_data, trace_data_index, file_name, func_name, function_to_call_mapping, function_to_call_args, counter_map):
     last_root_call_line = 0
-
-    for trace_file_name, trace_func_name, event_type, depth in trace_data[1:]:  # sequence of "CALL" and "RETURN" calls gathered from sys.monitoring, representing execution trace
+    
+    index = 0
+    for index, (trace_file_name, trace_func_name, event_type, depth) in enumerate(trace_data[trace_data_index:]):  # sequence of "CALL" and "RETURN" calls gathered from sys.monitoring, representing execution trace
+        if len(stack) == 0:
+            break
         key = (stack[-1].file_name, stack[-1].func_name)
 
         if event_type == 'CALL':  # strategy here is to create VariableAssignmentObjects for all the lines up to the current call
@@ -304,6 +303,30 @@ def build_call_hierarchy(tracer):
     # add the last variable assignments in the root func that happen after the last function call within root
     add_deltas(tracer, (file_name, func_name), stack, counter_map, last_root_call_line, greater_than=True)
 
+    return index
+
+
+def build_call_hierarchy(tracer):
+    trace_data = tracer.call_stack_history
+    function_to_call_mapping = tracer.function_to_call_mapping
+    function_to_call_args = tracer.function_to_call_args
+    counter_map = defaultdict(int)  # one function can get called multiple times throughout execution, so we keep an index to figure out which execution number we're at
+
+    trace_data_index = 0
+
+    full_stack = []
+    
+    while trace_data_index < len(trace_data) - 1:
+        file_name, func_name, event_type, _ = trace_data[trace_data_index]
+        root_call = FunctionCallNode(file_name, func_name, [])  # todo: can root level pytest functions/fixtures have call args?
+        stack = [root_call]
+
+        trace_data_index += 1
+
+        trace_data_index += build_call_hierarchy_interval(stack, trace_data, trace_data_index, file_name, func_name, function_to_call_mapping, function_to_call_args, counter_map)
+
+        full_stack.append(root_call)
+
     # add the erroring line to the trace
     traceback = tracer.traceback
     if traceback:
@@ -316,13 +339,12 @@ def build_call_hierarchy(tracer):
         try:
             source_code = tracer.function_to_source[(file_path, func_name)]
         except KeyError:  # we've likely hit library code
-            return root_call
+            return full_stack
 
         error_context_line = source_code.split("\n")[line_no - 1].strip()
-        root_call.children.append(VariableAssignmentNode(tracer.error_type, tracer.error_message,
-                                                         error_context_line))  # todo: this assume the error messages at the root pytest function call. is that true?
+        full_stack.append(VariableAssignmentNode(tracer.error_type, tracer.error_message, error_context_line))  # todo: this assume the error messages at the root pytest function call. is that true?
 
-    return root_call
+    return full_stack
 
 
 def output_call_hierarchy(nodes, output, indent=0):
@@ -346,7 +368,7 @@ def generate_suggestion(gpt: GPT, test_failed: bool):
     global tracer
     root = build_call_hierarchy(tracer)
     output = []
-    output_call_hierarchy([root], output)
+    output_call_hierarchy(root, output)
 
     source_text = ""
     if tracer.scope:
