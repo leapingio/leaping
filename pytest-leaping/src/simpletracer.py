@@ -185,8 +185,8 @@ class SimpleTracer:
 
             self.line_counter[key] += 1
 
-            if (file_path,
-                func_name) not in self.function_to_source.keys():  # if we haven't yet gotten the source/ast parsed the function
+            if (file_path, func_name) not in self.function_to_source.keys():  # if we haven't yet gotten the source/ast parsed the function
+                
                 source = get_function_source_from_frame(frame, self.method_to_class_source)
 
                 if source:
