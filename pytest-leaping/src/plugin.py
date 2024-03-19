@@ -253,8 +253,6 @@ def add_deltas(tracer, key, stack, counter_map, line_no, greater_than=False):
                 else:
                     value_string = value[0]
 
-                print(var_name, value_string)
-
                 context_line = tracer.function_to_source[key].split("\n")[assignment_line_no - 1].strip()
                 if len(stack) != 0:
                     stack[-1].children.append(VariableAssignmentNode(var_name, value_string, context_line))
