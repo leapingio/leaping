@@ -140,7 +140,8 @@ class SimpleTracer:
         self.traceback = None
         self.call_stack_history = []
         self.stack_size = 0
-        self.scope = None
+        self.scope = set()
+        self.scope_list = []
         self.line_counter = defaultdict(int)
         self.monitoring_possible = False
 

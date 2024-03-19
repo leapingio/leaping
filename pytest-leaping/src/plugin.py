@@ -364,6 +364,19 @@ def output_call_hierarchy(nodes, output, indent=0):
             output.append(line)
 
 
+def fetch_source(key):
+    func_source = ""
+    try:
+        if key in tracer.method_to_class_source:
+            func_source = tracer.method_to_class_source[key]
+        else:
+            func_source = tracer.function_to_source[key]
+    except KeyError:
+        pass
+
+    return func_source
+
+
 def generate_suggestion(gpt: GPT, test_failed: bool):
     global tracer
     root = build_call_hierarchy(tracer)
@@ -371,31 +384,27 @@ def generate_suggestion(gpt: GPT, test_failed: bool):
     output_call_hierarchy(root, output)
 
     source_text = ""
-    if tracer.scope:
-        for key in tracer.scope:
-            func_source = None
-            try:
-                if key in tracer.method_to_class_source:
-                    func_source = tracer.method_to_class_source[key]
-                else:
-                    func_source = tracer.function_to_source[key]
-            except KeyError:
-                pass
-
-            if func_source:
-                source_text += func_source + "\n\n"
+    source_char_limit = 40000  # 10 cents
+    seen_keys = set()
+    if tracer.scope_list:
+        for key in (tracer.scope_list[::-1]):
+            if key not in seen_keys:
+                func_source = fetch_source(key)
+                if func_source:
+                    source_text += func_source + "\n\n"
+                    if len(source_text) > source_char_limit:
+                        break
+                seen_keys.add(key)
     else:  # case for < 3.12
-        for file_path, func_name, _, _ in tracer.call_stack_history:
+        for file_path, func_name, _, _ in tracer.call_stack_history[::-1]:
             key = (file_path, func_name)
-            try:
-                if key in tracer.method_to_class_source:
-                    func_source = tracer.method_to_class_source[key]
-                else:
-                    func_source = tracer.function_to_source[key]
-            except KeyError:
-                pass
-            if func_source:
-                source_text += func_source + "\n\n"
+            if key not in seen_keys:
+                func_source = fetch_source(key)
+                if func_source:
+                    source_text += func_source + "\n\n"
+                    if len(source_text) > source_char_limit:
+                        break
+                seen_keys.add(key)
 
 
     if test_failed:
@@ -420,14 +429,15 @@ def generate_suggestion(gpt: GPT, test_failed: bool):
 def add_scope():
     global tracer
 
-    scope = set()
+    scope = []
 
     for file_name, func_name, call_type, depth in tracer.call_stack_history:
-        if call_type != "RETURN" and depth < 4:
-            scope.add((file_name, func_name))
+        if call_type != "RETURN":
+            scope.append((file_name, func_name))
 
     tracer.call_stack_history = []  # reset stack history since we are re-running test
-    tracer.scope = scope
+    tracer.scope_list = scope
+    tracer.scope = set(scope)
 
 
 def launch_cli(test_failed: bool):
