@@ -72,6 +72,9 @@ def create_ast_mapping(parsed_ast, assign_mapping, call_mapping):
                 variables = [n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)]
                 assign_mapping[node.lineno].append(ASTAssignment(name=assignee.id, deps=variables))
 
+        elif isinstance(node, ast.AugAssign) or isinstance(node, ast.AnnAssign):
+            assign_mapping[node.lineno].append(ASTAssignment(name=node.target.id, deps=[]))
+
         elif isinstance(node, ast.Return):
             variables = []
             if node.value:
@@ -127,7 +130,7 @@ class SimpleTracer:
         self.test_duration = None
         self.function_to_assign_mapping = defaultdict(list)
         self.function_to_call_mapping = defaultdict(list)
-        self.function_to_deltas = defaultdict(lambda: defaultdict(list))
+        self.function_to_deltas = defaultdict(list)
         self.function_to_call_args = defaultdict(list)
         self.function_to_source = {}
         self.method_to_class_source = {}
@@ -205,8 +208,24 @@ class SimpleTracer:
             curr_locals = frame.f_locals
 
             deltas: list[RuntimeAssignment] = get_deltas(prev_locals, curr_locals)
-            if deltas:
-                self.function_to_deltas[(file_path, func_name)][relative_line_no].append(deltas)
+
+            delta_map = defaultdict(lambda: defaultdict(list))
+
+            for delta in deltas:
+                delta_map[delta.name][relative_line_no].append(delta.value)
+
+            if self.function_to_deltas[(file_path, func_name)][-1] == "NEW":
+                self.function_to_deltas[(file_path, func_name)][-1] = delta_map
+            else:
+                last_map = self.function_to_deltas[(file_path, func_name)][-1]
+                for var_name, line_delta_list in delta_map.items():
+                    if var_name not in last_map:
+                        last_map[var_name] = line_delta_list
+                    else:
+                        for key, val in line_delta_list.items():
+                            last_map[var_name][key].extend(val)
+
+                self.function_to_deltas[(file_path, func_name)][-1] = last_map
 
             cursor = self.create_cursor(file_path, frame)
             self.call_stack.new_cursor_in_current_frame(cursor)
@@ -222,6 +241,8 @@ class SimpleTracer:
 
             cursor = self.create_cursor(file_path, frame)
             self.call_stack.enter_frame(cursor)
+
+            self.function_to_deltas[(file_path, func_name)].append("NEW")
 
         if event == "return":
             self.stack_size -= 1

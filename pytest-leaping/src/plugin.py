@@ -194,12 +194,19 @@ def pytest_runtest_makereport(item, call):
 
 
 def add_deltas(tracer, key, stack, counter_map, line_no, greater_than=False):
-    assignments = tracer.function_to_assign_mapping[
-        key]  # all assignments in that function (which we got from AST parsing)
+    assignments = tracer.function_to_assign_mapping[key]  # all assignments in that function (which we got from AST parsing)
 
     assignments_to_add_line_nos = set()
     if not assignments:
         return
+    
+    # from ast assignemnt we get name and line number
+    # from deltas we get name and line number + value
+    # but sometimes the line numbers don't match, so do we even need the line number from the deltas?
+    # well technically, the variable could show up multiple times at different lines so we need to still have a notion of ordering.
+    # but even the ordering gets funky when we start talking about loops, for example
+    # for ex, b only updates at the first line of the loop, so the ordering gets messed up.
+    # i guess we can assume that if we take the line numbers for one variable, the order should be fine, and we can default to the closest line number
 
     for assignment_line_no in assignments.keys():
         if greater_than and assignment_line_no > line_no:  # when we want to get all the assignments after line_no
@@ -211,27 +218,46 @@ def add_deltas(tracer, key, stack, counter_map, line_no, greater_than=False):
         for ast_assignment in assignments[assignment_line_no]:  # all the ast assignments at that line number
             var_name = ast_assignment.name
             value = None
+            delta_list = tracer.function_to_deltas[key][counter_map[key]]
 
-            delta_list = tracer.function_to_deltas[key][assignment_line_no]
             if not delta_list:
                 continue
                 # deltas are runtime assignments, which means that since a function can get executed multiple times during an execution trace, we need to keep a
             # monotonically increasing counter (per function and per line number) to get the right deltas
-            delta_index = counter_map[key][assignment_line_no]
-            if delta_index >= len(delta_list):  # technically shouldn't get here
-                continue
-            deltas = delta_list[delta_index]
-            for runtime_assignment in deltas:
+            
+            for runtime_assignment in delta_list:
                 # This inner loop matches up static AST assignments with runtime deltas. We shouldn't need to have a loop, but would need to refactor some data structure.
                 # Fine for now since there should rarely be more than one variable assignment per line
-                if runtime_assignment.name == var_name:
-                    value = runtime_assignment.value
-                    break
+                if runtime_assignment == var_name:
+                    value = delta_list[runtime_assignment][assignment_line_no]
+                    if value:
+                        break
+                    else:  # line numbers don't match up between deltas and AST parsing, look for closest line number as heuristic for now
+                        closest = float('inf')
+                        for line_no, deltas in delta_list[runtime_assignment].items():
+                            if not deltas:
+                                continue
+                            if abs(assignment_line_no - line_no) < abs(assignment_line_no - closest):
+                                closest = line_no
+                        value = delta_list[runtime_assignment][closest]
+                        break
 
             if value:
+                del delta_list[runtime_assignment][assignment_line_no]
+                value_string = ""
+                if len(value) > 1:
+                    if len(value) > 5:
+                        value_string = "Last 5 values in loop: [" + ", ".join(value[:5]) + "]"
+                    else:
+                        value_string = "Values in loop: [" + ", ".join(value) + "]"
+                else:
+                    value_string = value[0]
+
+                print(var_name, value_string)
+
                 context_line = tracer.function_to_source[key].split("\n")[assignment_line_no - 1].strip()
                 if len(stack) != 0:
-                    stack[-1].children.append(VariableAssignmentNode(var_name, value, context_line))
+                    stack[-1].children.append(VariableAssignmentNode(var_name, value_string, context_line))
 
 
 def build_call_hierarchy(tracer):
@@ -242,8 +268,7 @@ def build_call_hierarchy(tracer):
     root_call = FunctionCallNode(file_name, func_name, [])  # todo: can root level pytest functions have call args?
     stack = [root_call]
 
-    counter_map = defaultdict(lambda: defaultdict(
-        int))  # one function can get called multiple times throughout execution, so we keep an index to figure out which execution # we're at
+    counter_map = defaultdict(int)  # one function can get called multiple times throughout execution, so we keep an index to figure out which execution number we're at
     last_root_call_line = 0
 
     for trace_file_name, trace_func_name, event_type, depth in trace_data[
@@ -266,6 +291,7 @@ def build_call_hierarchy(tracer):
                     last_root_call_line = line_no  # save that line
 
                 add_deltas(tracer, key, stack, counter_map, line_no)
+                counter_map[key] += 1
 
             call_args_list = function_to_call_args[(trace_file_name, trace_func_name)]  # list of call args
             if call_args_list:
