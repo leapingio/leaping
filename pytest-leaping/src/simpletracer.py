@@ -1,4 +1,4 @@
-from models import ExecutionCursor, CallStack, ASTAssignment, RuntimeAssignment
+from leaping_models import ExecutionCursor, CallStack, ASTAssignment, RuntimeAssignment
 import ast
 import inspect
 import textwrap

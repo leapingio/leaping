@@ -8,11 +8,11 @@ import pexpect
 
 from simpletracer import SimpleTracer
 import subprocess
-from gpt import GPT
+from leaping_gpt import GPT
 from _pytest.runner import runtestprotocol
 import os
 import time
-from models import FunctionCallNode, VariableAssignmentNode
+from leaping_models import FunctionCallNode, VariableAssignmentNode
 from _pytest.capture import MultiCapture
 
 tracer = SimpleTracer()
@@ -85,17 +85,16 @@ def pytest_collection_modifyitems(config, items):
 
 def _should_trace(file_name: str, func_name: str) -> bool:
     leaping_specific_files = [
-        "conftest",
         "plugin",
-        "models",
-        "gpt",  # TODO: maybe make this LEAPING_ or something less likely to run into collisions
+        "leaping_models",
+        "leaping_gpt",  # TODO: maybe make this LEAPING_ or something less likely to run into collisions
     ]
     if "<" in file_name:
         return False
     if any(leaping_specific_file in file_name for leaping_specific_file in leaping_specific_files):
         return False
 
-    if (".pyenv" in file_name) or (".venv" in file_name):
+    if (".pyenv" in file_name) or (".venv" in file_name) or ("site-packages" in file_name):
         return False
 
     if os.path.abspath(file_name).startswith(tracer.project_dir):
