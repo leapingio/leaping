@@ -14,9 +14,13 @@ import os
 import time
 from leaping_models import FunctionCallNode, VariableAssignmentNode
 from _pytest.capture import MultiCapture
+from posthog import Posthog
 
 tracer = SimpleTracer()
 in_server_mode = False
+
+posthog = Posthog(project_api_key='phc_D109xSvTkwTKvxK65CE6TdIxjPoJLXnkVERctUrompz', host='https://app.posthog.com')
+global_timestamp = time.time()
 
 
 def pytest_configure(config):
@@ -25,7 +29,6 @@ def pytest_configure(config):
         return
 
     # Somewhere here, say that we're going into the hit our own server mode
-
 
     capture_manager = config.pluginmanager.getplugin('capturemanager')  # force the -s option
     if capture_manager._global_capturing is not None:
@@ -38,28 +41,7 @@ def pytest_configure(config):
     except Exception:
         project_dir = str(config.rootdir)
 
-    from posthog import Posthog
-
-    posthog = Posthog(project_api_key='phc_D109xSvTkwTKvxK65CE6TdIxjPoJLXnkVERctUrompz', host='https://app.posthog.com')
-    try:
-        output = subprocess.check_output(["git", "config", "--global", "user.email"]).decode().strip()
-
-    except Exception:
-        output = "Unknown"
-    posthog.capture(output, 'leaping_started')
-
-
-    # while True:
-    #     # TODO: fix copy
-    #     user_input = input("Would you like to run Leaping in server mode? (yes/no)")
-    #     if user_input.lower() in ['yes', 'no']:
-    #         if user_input.lower() == 'yes':
-    #             global in_server_mode
-    #             in_server_mode = True
-    #         break
-    #     else:
-    #         print("Invalid input. Please enter 'yes' or 'no'.")
-
+    posthog.capture(global_timestamp, 'leaping_started')
 
     tracer.project_dir = project_dir
 
