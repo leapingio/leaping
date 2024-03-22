@@ -13,11 +13,8 @@ It does this by keeping track of all of the variable changes and other sources o
 ``
 pytest --leaping
 ``  
-
 By default, pytest automatically discovers all the python tests within your project and runs them. Once the test has been run, a CLI will open allowing you
 to interact with the debugger.
-
-
 
 # Features
 You can ask Leaping questions like:
