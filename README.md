@@ -7,7 +7,7 @@ It does this by keeping track of all of the variable changes and other sources o
 
 # Installation
 - ``pip install leaping``
-- Please set the environment variable `OPENAI_API_KEY` to your GPT API key
+- Please set the environment variable `OPENAI_API_KEY` to your GPT API key, if you plan on using GPT
 
 # Usage
 ``
@@ -15,6 +15,8 @@ pytest --leaping
 ``  
 By default, pytest automatically discovers all the python tests within your project and runs them. Once the test has been run, a CLI will open allowing you
 to interact with the debugger.
+
+When pytest starts up, you will be prompted to select a model. Right now, we support both Ollama and GPT-4.
 
 # Features
 
