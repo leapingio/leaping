@@ -3,12 +3,13 @@ from collections import defaultdict
 import sys
 import threading
 from types import CodeType
+import datetime
 
 import pexpect
 
 from simpletracer import SimpleTracer
 import subprocess
-from leaping_gpt import GPT
+from leaping_llm_wrapper import GPT, Ollama, LLM
 from _pytest.runner import runtestprotocol
 import os
 import time
@@ -16,12 +17,10 @@ from leaping_models import FunctionCallNode, VariableAssignmentNode
 from _pytest.capture import MultiCapture
 from posthog import Posthog
 
-tracer = SimpleTracer()
-in_server_mode = False
-
 posthog = Posthog(project_api_key='phc_D109xSvTkwTKvxK65CE6TdIxjPoJLXnkVERctUrompz', host='https://app.posthog.com')
-global_timestamp = time.time()
-
+global_timestamp = datetime.datetime.now(datetime.UTC).timestamp()
+tracer = SimpleTracer()
+llm = None
 
 def pytest_configure(config):
     leaping_option = config.getoption('--leaping')
@@ -42,6 +41,22 @@ def pytest_configure(config):
         project_dir = str(config.rootdir)
 
     posthog.capture(global_timestamp, 'leaping_started')
+    while True:
+        # TODO: fix copy
+        user_input = input("Please enter the number of the model you'd like to use? \n 1. GPT-4 \n 2. Ollama \n> ")
+        global llm
+        if "1" in user_input:
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                api_key = input("Please enter your OpenAI API key: ")
+                os.environ["OPENAI_API_KEY"] = api_key # set key as env var
+            llm = GPT("gpt-4-0125-preview", temperature=0.5)
+            break
+        elif "2" in user_input:
+            llm = Ollama("llama2")
+            break
+        else: # invalid input
+            print("Invalid input. Please enter '1' or '2'.")
 
     tracer.project_dir = project_dir
 
@@ -358,7 +373,7 @@ def fetch_source(key):
     return func_source
 
 
-def generate_suggestion(gpt: GPT, test_failed: bool):
+def generate_suggestion(llm: LLM, test_failed: bool):
     global tracer
     root = build_call_hierarchy(tracer)
     output = []
@@ -402,8 +417,8 @@ def generate_suggestion(gpt: GPT, test_failed: bool):
     else:
         prompt = test_passing_prompt.format("\n".join(output), source_text)
 
-    gpt.add_message("user", prompt)
-    return gpt.chat_completion(stream=True)
+    llm.add_message("user", prompt)
+    return llm.chat_completion(stream=True)
 
 
 # Before re-running failed test, need to add scope information to tracer so that we can instrument the re-run
@@ -423,6 +438,7 @@ def add_scope():
 
 def launch_cli(test_failed: bool):
     import socket
+    global llm
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(('localhost', 0))  # let the os pick a port
     sock.listen(1)
@@ -430,8 +446,7 @@ def launch_cli(test_failed: bool):
 
     def handle_output(sock, child):
         connection, client_address = sock.accept()
-        gpt = GPT("gpt-4-0125-preview", 0.5, in_server_mode)
-        initial_message = generate_suggestion(gpt, test_failed)
+        initial_message = generate_suggestion(llm, test_failed)
         if traceback_obj := tracer.traceback:
             error_type = tracer.error_type
             error_message = tracer.error_message
